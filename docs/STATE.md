@@ -55,6 +55,40 @@ have been a dev build that accepts payloads from any relay. `SERVERID` is now
 required by the target and by CI (`H9B_SERVERID` secret); building without it
 fails loudly instead of shipping an unauthenticated client.
 
+## 2026-10-22 — public repo is the entry point (correct flow)
+
+The intended flow is: customer curls the **public repository**, and that script is
+what talks to the h9b server. Publishing the script is safe — it only downloads a
+binary and runs it. Anchors, offsets and recipes never leave the server.
+
+18. **There was no Windows entry point at all.** `iwr ... | iex` needs a `.ps1`,
+    and the repo only had `install.sh`. Added `install.ps1`: mirror-first
+    download, SHA256 verify, `Unblock-File` before exec, exe deleted on exit.
+    TLS 1.2 is pinned explicitly because Windows PowerShell 5.1 still defaults to
+    TLS 1.0 on some builds and the handshake then fails with a useless
+    "underlying connection was closed".
+19. **Splatting a string in PowerShell splits it into characters.** `$argv =
+    $ArgsStr -split '\s+'` returns a *scalar* when there is one word, and `& $exe
+    @argv` enumerates a string as `IEnumerable<char>` — so `h9b apply` arrived as
+    `a,p,p,l,y` and the binary answered `unknown command "a"`. `@(...)` around the
+    expression is load-bearing. Caught by running it on the Windows box; reading
+    the code would not have found it.
+20. **`raw.githubusercontent.com` caches `master` for 5 minutes.** `max-age=300`,
+    `x-cache: HIT`. Right after a push the URL still served the previous file, so
+    a fix appeared not to work. Pin a commit SHA when verifying
+    (`.../3d8a6dd/install.ps1`), or wait out the TTL.
+
+Verified end to end on both platforms, nothing installed:
+
+| | Linux | Windows |
+|---|---|---|
+| entry point | `curl .../master/install.sh \| sh -s -- …` | `iwr .../master/install.ps1 \| iex` |
+| binary source | `h9bd /dl/h9b-linux-amd64` | `h9bd /dl/h9b-windows-amd64.exe` |
+| residue | `~/.h9b/config.json` only | `%USERPROFILE%\.h9b\config.json` only |
+| temp dirs left | 0 | 0 |
+| installed binary | none | none (`Test-Path $env:LOCALAPPDATA\h9b` = False) |
+| result | `activated lic_… tier=pro` | `SELESAI — 5/5 terverifikasi` |
+
 ## 2026-10-22 — no-install mode, self-hosted binaries
 
 Two problems with the customer path, both found by actually running the public
