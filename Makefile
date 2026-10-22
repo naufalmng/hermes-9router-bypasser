@@ -93,7 +93,8 @@ release:
 	    build $(GOFLAGS) -tags pepperbuild -ldflags "$(LDFLAGS)" \
 	    -o $(DIST)/h9b-$$os-$$arch$$ext ./cmd/h9b || exit 1; \
 	done
-	env GOOS=linux CGO_ENABLED=0 go build $(GOFLAGS) -ldflags "-s -w" \
+	env GOOS=linux CGO_ENABLED=0 go build $(GOFLAGS) \
+	  -ldflags "-s -w -X main.serverVersion=$(VERSION)" \
 	  -o $(DIST)/h9bd-linux-$(HOSTARCH) ./cmd/h9bd
 	cd $(DIST) && sha256sum * > SHA256SUMS && cat SHA256SUMS
 

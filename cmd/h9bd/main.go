@@ -49,7 +49,9 @@ import (
 	"github.com/apizen/h9b/internal/token"
 )
 
-const serverVersion = "0.1.0"
+// serverVersion is stamped by the release build (-X main.serverVersion). It is a
+// var, not a const, for exactly that reason: a const is inlined and un-settable.
+var serverVersion = "0.1.0-dev"
 
 func main() {
 	if len(os.Args) < 2 {
