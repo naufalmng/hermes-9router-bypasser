@@ -30,6 +30,27 @@ requires Go >= 1.27 and exits instantly on this box (Go 1.22.2). Pinned to
 `v0.12.1` in the Makefile (`make garble-install`). The failure mode is nasty —
 it overwrites the working binary, so the next release build silently fails.
 
+### v0.18.0 evaluated and rejected (measured, not guessed)
+
+Making v0.18.0 work needs a real GOROOT, not a toolchain module: garble patches
+`src/cmd/link/internal/ld/pcln.go`, and Go refuses to overlay files under
+GOMODCACHE (`overlay contains a replacement for .../toolchain@.../pcln.go`).
+Copying the downloaded toolchain to `/opt/go1.27` and building with
+`GOROOT=/opt/go1.27` does work — activate + apply both succeeded.
+
+It is still the wrong choice:
+
+| | v0.12.1 / Go 1.22 | v0.18.0 / Go 1.27 |
+|---|---|---|
+| binary | 9.09 MB | 18.35 MB |
+| `ServerID`, `LicenseID`, `RecipeIDs` in `strings` | absent | **plaintext** |
+| symbol table | empty | empty |
+| extra toolchain to maintain | no | 253 MB GOROOT |
+
+Newer garble leaks *more* here: Go 1.27's encoding/json reflection keeps the
+struct field names as plain strings and garble no longer obfuscates them.
+Staying on v0.12.1 — smaller and quieter.
+
 Deployment choices worth remembering:
 
 - **Second tunnel, not a new ingress rule.** `bojongkulur-edge` carries
