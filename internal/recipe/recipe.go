@@ -141,6 +141,15 @@ func applyOne(r Recipe, o Options) Result {
 	if len(r.Target.Platforms) > 0 && !contains(r.Target.Platforms, o.Platform) {
 		return Result{ID: r.ID, Status: "skipped", Detail: "platform " + o.Platform}
 	}
+	// Distinguish "the app this recipe targets is not installed" from "the file
+	// moved". The first is normal on a customer machine and must not fail the
+	// run; the second is anchor drift and must be reported.
+	if strings.Contains(r.Target.Path, "{hermes") && HermesRoot(o.Home) == "" {
+		return Result{ID: r.ID, Status: "skipped", Detail: "hermes not installed"}
+	}
+	if strings.Contains(r.Target.Path, "{router9_chunks}") && Router9Chunks() == "" {
+		return Result{ID: r.ID, Status: "skipped", Detail: "9router not installed"}
+	}
 	path, err := ExpandPath(r.Target.Path, o.Home)
 	if err != nil {
 		return Result{ID: r.ID, Status: "error", Detail: err.Error()}
@@ -355,31 +364,121 @@ func Load(path string) (*Bundle, error) {
 	return &out, nil
 }
 
-// ExpandPath resolves the placeholders a recipe is allowed to use.
+// discover returns the first candidate directory that exists and contains at
+// least one of the marker files.
 //
-// Placeholders are resolved on the client, never on the server, so one bundle
-// serves every OS and every install prefix without a per-customer payload.
-// Router9Chunks resolves the 9router server-chunk directory.
+// Hardcoding install paths is how a cross-platform product silently does nothing
+// on half its customers. The two layouts seen in the wild:
 //
-// Global npm prefix varies by distro (/usr/lib vs /usr/local/lib), so the
-// environment override exists for the odd box. Everything else is the default
-// Debian layout.
+//	Linux/portable   ~/.hermes/hermes-agent
+//	Windows installer %LOCALAPPDATA%\hermes\hermes-agent
+//
+// Marker validation matters: an empty directory named `hermes-agent` must not win
+// over a real install further down the list.
+func discover(candidates []string, markers []string) string {
+	for _, dir := range candidates {
+		if dir == "" {
+			continue
+		}
+		for _, m := range markers {
+			if _, err := os.Stat(filepath.Join(dir, m)); err == nil {
+				return dir
+			}
+		}
+	}
+	return ""
+}
+
+// HermesRoot locates the hermes-agent source tree on this machine.
+//
+// Returns "" when nothing is found; callers then report no_target rather than
+// guessing a path and creating a file in the wrong place.
+func HermesRoot(home string) string {
+	if p := os.Getenv("H9B_HERMES_ROOT"); p != "" {
+		return p
+	}
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData == "" && runtime.GOOS == "windows" {
+		localAppData = filepath.Join(home, "AppData", "Local")
+	}
+	appData := os.Getenv("APPDATA")
+	if appData == "" && runtime.GOOS == "windows" {
+		appData = filepath.Join(home, "AppData", "Roaming")
+	}
+
+	candidates := []string{
+		filepath.Join(home, ".hermes", "hermes-agent"),
+		filepath.Join(localAppData, "hermes", "hermes-agent"),
+		filepath.Join(localAppData, "Programs", "hermes", "hermes-agent"),
+		filepath.Join(appData, "hermes", "hermes-agent"),
+		"/opt/hermes/hermes-agent",
+		"/opt/garapan/hermes-agent",
+	}
+	return discover(candidates, []string{
+		filepath.Join("tools", "threat_patterns.py"),
+		filepath.Join("agent", "prompt_builder.py"),
+	})
+}
+
+// router9Roots is a var so tests can simulate "npm global has no 9router".
+var router9Roots = func(home, localAppData, appData string) []string {
+	return []string{
+		"/usr/lib/node_modules",
+		"/usr/local/lib/node_modules",
+		"/opt/homebrew/lib/node_modules",
+		filepath.Join(appData, "npm", "node_modules"),
+		filepath.Join(localAppData, "npm", "node_modules"),
+		filepath.Join(os.Getenv("ProgramFiles"), "nodejs", "node_modules"),
+		filepath.Join(home, "node_modules"),
+	}
+}
+
+// Router9Chunks locates the compiled 9router server chunks.
+//
+// 9router ships as a Next.js CLI build; the patchable files are inside the npm
+// global root, which differs per platform, per install method, and per distro.
 func Router9Chunks() string {
 	if p := os.Getenv("H9B_ROUTER9_CHUNKS"); p != "" {
 		return p
 	}
-	return "/usr/lib/node_modules/9router/app/.next-cli-build/server/chunks"
+	home, _ := os.UserHomeDir()
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData == "" && runtime.GOOS == "windows" {
+		localAppData = filepath.Join(home, "AppData", "Local")
+	}
+	appData := os.Getenv("APPDATA")
+	if appData == "" && runtime.GOOS == "windows" {
+		appData = filepath.Join(home, "AppData", "Roaming")
+	}
+
+	const suffix = "9router/app/.next-cli-build/server/chunks"
+	var candidates []string
+	for _, r := range router9Roots(home, localAppData, appData) {
+		if r == "" {
+			continue
+		}
+		candidates = append(candidates, filepath.Join(r, suffix))
+	}
+	return discover(candidates, []string{"5330.js", "8499.js"})
 }
 
+// ExpandPath resolves the placeholders a recipe is allowed to use.
+//
+// Placeholders are resolved on the client, never on the server, so one bundle
+// serves every OS and every install prefix without a per-customer payload.
 func ExpandPath(p, home string) (string, error) {
 	chunks := Router9Chunks()
+	root := HermesRoot(home)
 	repl := map[string]string{
 		"{home}":           home,
-		"{hermes}":         filepath.Join(home, ".hermes"),
-		"{hermes_agent}":   filepath.Join(home, ".hermes", "hermes-agent"),
+		"{hermes}":         filepath.Dir(root),
+		"{hermes_agent}":   root,
 		"{localappdata}":   os.Getenv("LOCALAPPDATA"),
 		"{appdata}":        os.Getenv("APPDATA"),
 		"{router9_chunks}": chunks,
+	}
+	if root == "" && (strings.Contains(p, "{hermes_agent}") || strings.Contains(p, "{hermes}")) {
+		return "", fmt.Errorf("hermes install not found (looked in ~/.hermes/hermes-agent, %%LOCALAPPDATA%%\\hermes\\hermes-agent); set H9B_HERMES_ROOT")
 	}
 	if runtime.GOOS == "windows" && repl["{localappdata}"] == "" {
 		repl["{localappdata}"] = filepath.Join(home, "AppData", "Local")

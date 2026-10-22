@@ -6,6 +6,55 @@ by reading code.
 Concrete patch intel (anchors, chunk names, byte offsets) is deliberately kept out
 of this repository — it is the payload. See the private `FINDINGS.md`.
 
+## 2026-10-22 — proven on real Windows (NAUFAL-DESKTOP)
+
+The Linux run proved the protocol. This run proved the product, and it found four
+bugs that Linux could never have shown.
+
+Install layout on Windows is **not** `~/.hermes/hermes-agent`:
+
+```
+C:\Users\<user>\AppData\Local\hermes\hermes-agent      <- real install
+```
+
+`%LOCALAPPDATA%\hermes\hermes-agent`. The Linux layout still exists for portable
+installs, so both must be probed, and a directory that merely has the right name
+must not win over a real install (marker-file validation).
+
+Bugs found and fixed:
+
+1. **Every Hermes recipe reported `no_target` on Windows** — `{hermes_agent}`
+   expanded to `~/.hermes/hermes-agent`, which does not exist there. Fixed with
+   `HermesRoot()` discovery over both layouts, validated by marker files.
+2. **9router recipes were Linux-only** (`platforms: ["linux"]`), so Windows
+   customers got nothing. Chunk files are byte-identical across platforms for the
+   same npm version, so the payload now lists linux/windows/darwin.
+3. **A missing app failed the whole run** — a customer without 9router saw
+   `5 failed` and exit 1. Now `skipped: 9router not installed`, exit 0. The
+   distinction kept: app installed but file moved is still a reported failure.
+4. **`h9b rollback` reported "nothing to roll back" on every Windows install** —
+   it walked the hardcoded Linux path. It now resolves through `HermesRoot()`.
+
+Proof, in order, on the real box:
+
+```
+stock            SOUL.md -> ['prompt_injection']    (scanned)
+h9b apply        3 applied, 7 already, 0 failed
+patched          SOUL.md -> []                       (bypassed)
+                 notes.md -> ['prompt_injection']    (still scanned)
+h9b rollback     restored 3 file(s), 0 failed
+stock again      SOUL.md -> ['prompt_injection']
+h9b apply        bypass back
+```
+
+`USER.md` and `random.txt` stay scanned in every state — the bypass is scoped to
+the one filename, not global.
+
+Also fixed: `make release` did not stamp `main.serverID`, so a release build would
+have been a dev build that accepts payloads from any relay. `SERVERID` is now
+required by the target and by CI (`H9B_SERVERID` secret); building without it
+fails loudly instead of shipping an unauthenticated client.
+
 ## 2026-10-22 — deployed and proven through the public endpoint
 
 ```

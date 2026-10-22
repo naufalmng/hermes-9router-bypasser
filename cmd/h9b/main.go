@@ -494,9 +494,20 @@ func cmdRollback(args []string) error {
 	if err != nil {
 		return err
 	}
-	roots := []string{filepath.Join(home, ".hermes", "hermes-agent")}
+	// Resolve the install the same way `apply` does. Hardcoding ~/.hermes here
+	// meant rollback reported "nothing to roll back" on every Windows install,
+	// where the tree lives under %LOCALAPPDATA%\hermes\hermes-agent.
+	var roots []string
+	if r := recipe.HermesRoot(home); r != "" {
+		roots = append(roots, r)
+	}
 	if *all {
-		roots = append(roots, recipe.Router9Chunks())
+		if c := recipe.Router9Chunks(); c != "" {
+			roots = append(roots, c)
+		}
+	}
+	if len(roots) == 0 {
+		return errors.New("nothing to roll back: neither hermes nor 9router was found on this machine")
 	}
 
 	// original path -> newest backup path

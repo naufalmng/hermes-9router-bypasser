@@ -10,7 +10,8 @@
 set -eu
 
 VERSION="${H9B_VERSION:-latest}"
-BASE="${H9B_BASE:-https://github.com/apizen/hermes-9router-bypasser/releases/download}"
+REPO="${H9B_REPO:-naufalmng/hermes-9router-bypasser}"
+BASE="${H9B_BASE:-https://github.com/$REPO/releases}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -31,10 +32,10 @@ esac
 
 machine=$(uname -m)
 case "$machine" in
-  x86_64)  arch="a""md64" ;;
-  amd64)   arch="a""md64" ;;
-  aarch64) arch="ar""m64" ;;
-  arm64)   arch="ar""m64" ;;
+  x86_64)  arch="amd64" ;;
+  amd64)   arch="amd64" ;;
+  aarch64) arch="arm64" ;;
+  arm64)   arch="arm64" ;;
   *) echo "unsupported arch: $machine" >&2; exit 1 ;;
 esac
 
@@ -43,11 +44,11 @@ ext=""
 asset="h9b-${os}-${arch}${ext}"
 
 if [ "$VERSION" = "latest" ]; then
-  url="$BASE/latest/$asset"
-  sums_url="$BASE/latest/SHA256SUMS"
+  url="$BASE/latest/download/$asset"
+  sums_url="$BASE/latest/download/SHA256SUMS"
 else
-  url="$BASE/v$VERSION/$asset"
-  sums_url="$BASE/v$VERSION/SHA256SUMS"
+  url="$BASE/download/v$VERSION/$asset"
+  sums_url="$BASE/download/v$VERSION/SHA256SUMS"
 fi
 
 tmp=$(mktemp -d)

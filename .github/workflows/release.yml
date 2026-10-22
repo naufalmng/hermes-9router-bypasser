@@ -5,8 +5,12 @@ name: release
 # from a private host — it is published for convenience only.
 #
 # Required repository secrets:
-#   H9B_PIN          SPKI SHA-256 of the server certificate (hex)
-#   H9B_RELEASE_BASE unused; releases are served from GitHub by default
+#   H9B_SERVERID  base64 Ed25519 public key of the licence server
+#                 (read it from `journalctl -u h9bd | grep -o 'serverID=[^ ]*'`)
+#
+# Without H9B_SERVERID the build is a dev build: it warns at runtime and does not
+# authenticate the server, so payloads would be accepted from any relay. The
+# release target refuses to build without it.
 
 on:
   push:
@@ -32,7 +36,9 @@ jobs:
           go-version: "1.22"
 
       - name: install garble
-        run: go install mvdan.cc/garble@latest
+        # pinned: @latest now requires Go >= 1.27 and produces a bigger binary
+        # that leaks JSON field names as plaintext strings
+        run: go install mvdan.cc/garble@v0.12.1
 
       - name: verify payloads parse
         run: |
@@ -41,11 +47,11 @@ jobs:
 
       - name: build release
         env:
-          PIN: ${{ secrets.H9B_PIN }}
+          SERVERID: ${{ secrets.H9B_SERVERID }}
         run: |
           VERSION="${{ github.event.inputs.version || github.ref_name }}"
           VERSION="${VERSION#v}"
-          make release PIN="$PIN" VERSION="$VERSION"
+          make release SERVERID="$SERVERID" VERSION="$VERSION"
 
       - name: upload artifacts
         uses: actions/upload-artifact@v4

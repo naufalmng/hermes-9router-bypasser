@@ -58,16 +58,18 @@ payload:
 ## release — obfuscated cross-compiled client + plain server, with checksums
 release:
 	@if [ ! -x "$(GARBLE)" ]; then \
-	  echo "garble missing: go install mvdan.cc/garble@latest"; exit 1; fi
-	@if [ -z "$(PIN)" ]; then \
-	  echo "PIN required: make release PIN=<spki-hex>"; exit 1; fi
+	  echo "garble missing: make garble-install"; exit 1; fi
+	@if [ -z "$(SERVERID)" ]; then \
+	  echo "SERVERID required: make release SERVERID=<ed25519-pub-b64>"; \
+	  echo "  (a build without it warns at runtime and does NOT authenticate the server)"; \
+	  exit 1; fi
 	@mkdir -p $(DIST)
 	@for t in $(TARGETS); do \
 	  os=$${t%/*}; arch=$${t#*/}; ext=""; \
 	  [ "$$os" = "windows" ] && ext=".exe"; \
 	  echo "  -> $$os/$$arch"; \
 	  GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GARBLE) -tiny -literals \
-	    build $(GOFLAGS) -ldflags "-s -w -X main.pin=$(PIN) -X main.clientVersion=$(VERSION)" \
+	    build $(GOFLAGS) -ldflags "$(LDFLAGS)" \
 	    -o $(DIST)/h9b-$$os-$$arch$$ext ./cmd/h9b || exit 1; \
 	done
 	env GOOS=linux CGO_ENABLED=0 go build $(GOFLAGS) -ldflags "-s -w" \

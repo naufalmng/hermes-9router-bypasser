@@ -13,6 +13,42 @@ so a restart never touches the tunnel carrying SSH.
 Operator runbook lives outside this repo (it holds the identity public key and
 host specifics).
 
+## Install on a customer machine
+
+```sh
+curl -fsSL https://github.com/naufalmng/hermes-9router-bypasser/releases/latest/download/install.sh | sh
+h9b activate H9B-XXXXX-XXXXX-XXXXX-XXX
+h9b apply --dry-run --verbose     # look before you write
+h9b apply
+```
+
+The installer verifies `SHA256SUMS` and refuses to install a mismatched binary.
+
+### Windows
+
+The install layout is **not** `~/.hermes/hermes-agent`:
+
+```
+%LOCALAPPDATA%\hermes\hermes-agent     e.g. C:\Users\<user>\AppData\Local\hermes\hermes-agent
+```
+
+`h9b` probes both layouts and validates with marker files (`tools/threat_patterns.py`,
+`agent/prompt_builder.py`), so a stray directory with the right name cannot win.
+Override with `H9B_HERMES_ROOT` when a customer has an unusual prefix.
+
+A missing 9router is reported as `skipped: 9router not installed` and does **not**
+fail the run. A missing file inside an installed app is a real failure and does.
+
+## Build a release
+
+```sh
+make garble-install                                   # pinned v0.12.1
+make release SERVERID=<b64-ed25519-pub> VERSION=0.1.0
+```
+
+`SERVERID` is mandatory: without it the client is a dev build that warns and does
+not authenticate the server, which would let a relay hand out its own payloads.
+
 ## Server (h9bd) from scratch
 
 ### Build
