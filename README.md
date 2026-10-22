@@ -12,6 +12,13 @@ h9b activate H9B-XXXXX-XXXXX-XXXXX-XXX
 h9b apply
 ```
 
+No-install variant — nothing persists except `~/.h9b` (the licence):
+
+```
+curl -fsSL https://h9b.apizen.my.id/i | sh -s -- activate H9B-XXXXX-XXXXX-XXXXX-XXX
+curl -fsSL https://h9b.apizen.my.id/i | sh -s -- apply
+```
+
 ---
 
 ## Bahasa Indonesia
@@ -127,6 +134,25 @@ h9b status                  # lisensi + file yang kena
 h9b doctor                  # diagnosa: server, pin, fingerprint, target
 h9b rollback                # balikin ke stock (backup .h9b-<ts>)
 ```
+
+### Tanpa install
+
+Installer nggak wajib naruh binary di `~/.local/bin`. Kasih argumen apa saja dan
+binary cuma mampir di direktori temp, jalan, lalu dihapus:
+
+```bash
+curl -fsSL https://h9b.apizen.my.id/i | sh -s -- apply
+curl -fsSL https://h9b.apizen.my.id/i | sh -s -- doctor
+curl -fsSL https://h9b.apizen.my.id/i | sh -s -- --ephemeral status   # bentuk eksplisit
+```
+
+Yang tetap tinggal cuma `~/.h9b/config.json` — lisensinya. Jadi dua panggilan
+terpisah tetap nyambung: `activate` sekali, `apply` kapan saja, tanpa binary
+menetap. Exit code diteruskan apa adanya, jadi aman dipakai di script/CI.
+
+Alasan install tetap jadi default: `hermes update` mengembalikan guardrail, jadi
+`apply` perlu diulang. Dengan binary menetap itu satu perintah; tanpa install,
+unduh ulang 9 MB.
 
 Sisi operator:
 

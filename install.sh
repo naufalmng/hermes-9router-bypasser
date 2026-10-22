@@ -2,7 +2,16 @@
 # h9b installer — zero dependency, POSIX sh, verifies SHA-256 before install.
 #
 #   curl -fsSL https://h9b.apizen.my.id/i | sh
-#   curl -fsSL https://h9b.apizen.my.id/i | sh -s -- --version 0.1.0
+#   curl -fsSL https://h9b.apizen.my.id/i | sh -s -- --version 0.2.0
+#
+# No-install mode — nothing is written outside a temp dir that is deleted on exit:
+#
+#   curl -fsSL https://h9b.apizen.my.id/i | sh -s -- activate H9B-XXXXX-XXXXX-XXXXX-XXX
+#   curl -fsSL https://h9b.apizen.my.id/i | sh -s -- apply
+#
+# Any bare argument implies no-install: the binary is fetched to a temp dir, run
+# with those arguments, then removed. The licence config still lands in ~/.h9b so
+# the key survives; only the executable is thrown away.
 #
 # Env overrides:
 #   H9B_BASE   release base URL (default https://github.com/<org>/<repo>/releases/download)
@@ -12,13 +21,19 @@ set -eu
 VERSION="${H9B_VERSION:-latest}"
 REPO="${H9B_REPO:-naufalmng/hermes-9router-bypasser}"
 BASE="${H9B_BASE:-https://github.com/$REPO/releases}"
+MODE=install
+RUNARGS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --version) VERSION="$2"; shift 2 ;;
     --base)    BASE="$2"; shift 2 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
-    *) echo "unknown flag: $1" >&2; exit 2 ;;
+    --ephemeral|--no-install|--tmp) MODE=ephemeral; shift ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    --) shift; RUNARGS="$*"; MODE=ephemeral; break ;;
+    # A bare argument means "run this, do not install me" — the shortest path for
+    # someone who only wants to apply a patch once and be done.
+    *) RUNARGS="$*"; MODE=ephemeral; break ;;
   esac
 done
 
@@ -58,13 +73,16 @@ echo "  fetching $asset ($VERSION)"
 
 # Timeouts are not optional. A customer on a flaky link would otherwise sit at a
 # silent hang forever — the first version of this script had no timeout and did
-# exactly that on GitHub's asset CDN. Three tries, 20 s connect, 300 s total.
+# exactly that on GitHub's asset CDN. --speed-limit/--speed-time matter more than
+# --max-time here: the failure we actually hit was a connection that established
+# fine and then delivered nothing, which only a stall detector aborts quickly.
 fetch() { # fetch <url> <out>
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --connect-timeout 20 --max-time 300 \
-      --retry 3 --retry-delay 2 --retry-connrefused "$1" -o "$2"
+    curl -fsSL --connect-timeout 20 --max-time 180 \
+      --speed-limit 1024 --speed-time 20 \
+      --retry 4 --retry-delay 2 --retry-connrefused "$1" -o "$2"
   else
-    wget -q --timeout=20 --tries=3 -O "$2" "$1"
+    wget -q --timeout=20 --tries=4 -O "$2" "$1"
   fi
 }
 
@@ -91,13 +109,34 @@ else
   echo "  WARNING: no SHA256SUMS published for this release" >&2
 fi
 
+chmod +x "$tmp/h9b" 2>/dev/null || true
+
+# No-install path. The binary lives in $tmp and the EXIT trap deletes it, so the
+# only thing left behind is ~/.h9b (the licence), which is what has to survive.
+# Exit code is propagated verbatim: `apply` returns non-zero when verification
+# says BELUM SELESAI, and a caller in a script must see that.
+if [ "$MODE" = "ephemeral" ]; then
+  if [ -z "$RUNARGS" ]; then
+    echo "  fetched (not installed)" >&2
+    echo "  usage: ... | sh -s -- <h9b command> [args]" >&2
+    exit 2
+  fi
+  echo "  running: h9b $RUNARGS"
+  echo
+  # Capture the status explicitly rather than relying on `set -e`: the EXIT trap
+  # must still fire, and the caller must see h9b's own exit code.
+  rc=0
+  # shellcheck disable=SC2086  # deliberate word splitting of the arg list
+  "$tmp/h9b" $RUNARGS || rc=$?
+  exit $rc
+fi
+
 if [ "$os" = "windows" ]; then
   dir="${H9B_DIR:-${LOCALAPPDATA:-$HOME/AppData/Local}/h9b}"
 else
   dir="${H9B_DIR:-$HOME/.local/bin}"
 fi
 mkdir -p "$dir"
-chmod +x "$tmp/h9b" 2>/dev/null || true
 mv -f "$tmp/h9b" "$dir/h9b$ext"
 
 echo "  installed -> $dir/h9b$ext"
