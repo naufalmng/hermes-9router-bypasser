@@ -1,0 +1,8 @@
+[Unit]
+Description=h9b re-apply patches (survives hermes update)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/h9b apply
+# a failed apply is not a service failure — the customer just gets a status line
+SuccessExitStatus=1

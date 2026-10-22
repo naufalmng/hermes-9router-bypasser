@@ -1,0 +1,58 @@
+{
+  "_comment": "Schema example only. Anchors are placeholders — see README.md in this directory. Real recipes live server-side.",
+  "version": 1,
+  "id": "example-bundle",
+  "recipes": [
+    {
+      "id": "example-replace",
+      "title": "Literal replacement with a detect marker",
+      "target": {
+        "kind": "python_file",
+        "path": "{hermes_agent}/tools/example.py",
+        "platforms": ["linux", "darwin", "windows"]
+      },
+      "detect": {
+        "contains_any": ["# [H9B]", "SOME-OLDER-MARKER"]
+      },
+      "ops": [
+        {
+          "op": "replace",
+          "find": "def target_function(arg: str) -> str:",
+          "with": "def target_function(arg: str, extra: str = \"\") -> str:  # [H9B]",
+          "count": 1,
+          "required": true,
+          "label": "signature"
+        },
+        {
+          "op": "insert_after",
+          "find": "    \"\"\"Docstring anchor.\"\"\"",
+          "with": "\n    return \"\"  # [H9B]",
+          "required": true,
+          "label": "early return"
+        }
+      ],
+      "notes": "Required ops are all-or-nothing: if one misses, nothing is written."
+    },
+    {
+      "id": "example-regex",
+      "title": "Count-limited regex replacement",
+      "target": {
+        "kind": "text_file",
+        "path": "{router9_chunks}/0000.js",
+        "root": true,
+        "platforms": ["linux"]
+      },
+      "ops": [
+        {
+          "op": "regex_replace",
+          "pattern": "someMinifiedFlag:void 0",
+          "with": "someMinifiedFlag:cfg",
+          "count": 0,
+          "required": true,
+          "label": "all occurrences"
+        }
+      ],
+      "notes": "count 0 means replace every match."
+    }
+  ]
+}

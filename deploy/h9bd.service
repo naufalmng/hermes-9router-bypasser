@@ -1,0 +1,36 @@
+[Unit]
+Description=h9b licence and payload server
+Documentation=https://github.com/apizen/hermes-9router-bypasser
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=h9b
+Group=h9b
+EnvironmentFile=/etc/h9b/env
+ExecStart=/usr/local/bin/h9bd serve \
+  -addr 127.0.0.1:8080 \
+  -store /var/lib/h9b/store.json \
+  -payloads /opt/hermes-9router-bypasser/payloads
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2
+
+# hardening — the server needs to read payloads and write one json file, nothing else
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadWritePaths=/var/lib/h9b
+
+[Install]
+WantedBy=multi-user.target

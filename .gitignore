@@ -1,0 +1,34 @@
+# build artifacts
+/bin/
+/dist/
+
+# runtime state — never commit a licence store or a key
+/data/
+*.store.json
+store.json
+*.key
+*.pem
+certs/
+token.key
+server.key
+env
+
+# THE RECIPES ARE THE PRODUCT. They are served from the licence server only.
+# Committing them publishes the payload and makes the CDK pointless.
+payloads/*.json
+!payloads/example.recipe.json
+
+# Authoring generators carry the literal anchors — same reason as above.
+tools/*.py
+
+# customer keys printed by `h9bd cdk new`
+keys*.txt
+
+# patch backups created by the client
+*.h9b-*
+
+# editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
