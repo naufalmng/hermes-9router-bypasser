@@ -7,16 +7,25 @@ shipping the patch. Recipes live on the server, sealed per request to a licence
 and a machine, and are applied in memory.
 
 ```
-curl -fsSL https://h9b.apizen.my.id/i | sh
+curl -fsSL https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.sh | sh
 h9b activate H9B-XXXXX-XXXXX-XXXXX-XXX
 h9b apply
 ```
 
-No-install variant — nothing persists except `~/.h9b` (the licence):
+No-install variant — the script runs straight from GitHub and nothing is
+installed; only `~/.h9b` (the licence) persists:
 
 ```
-curl -fsSL https://h9b.apizen.my.id/i | sh -s -- activate H9B-XXXXX-XXXXX-XXXXX-XXX
-curl -fsSL https://h9b.apizen.my.id/i | sh -s -- apply
+curl -fsSL https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.sh | sh -s -- activate H9B-XXXXX-XXXXX-XXXXX-XXX
+curl -fsSL https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.sh | sh -s -- apply
+```
+
+Windows:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.ps1 | iex
+# with arguments:
+$env:H9B_ARGS="apply"; iwr -useb https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.ps1 | iex
 ```
 
 ---
@@ -137,13 +146,13 @@ h9b rollback                # balikin ke stock (backup .h9b-<ts>)
 
 ### Tanpa install
 
-Installer nggak wajib naruh binary di `~/.local/bin`. Kasih argumen apa saja dan
-binary cuma mampir di direktori temp, jalan, lalu dihapus:
+Script-nya jalan langsung dari GitHub, binary-nya nggak pernah menetap. Kasih
+argumen apa saja dan binary cuma mampir di direktori temp, jalan, lalu dihapus:
 
 ```bash
-curl -fsSL https://h9b.apizen.my.id/i | sh -s -- apply
-curl -fsSL https://h9b.apizen.my.id/i | sh -s -- doctor
-curl -fsSL https://h9b.apizen.my.id/i | sh -s -- --ephemeral status   # bentuk eksplisit
+curl -fsSL https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.sh | sh -s -- apply
+curl -fsSL https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.sh | sh -s -- doctor
+curl -fsSL https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.sh | sh -s -- --ephemeral status
 ```
 
 Yang tetap tinggal cuma `~/.h9b/config.json` — lisensinya. Jadi dua panggilan
@@ -153,6 +162,19 @@ menetap. Exit code diteruskan apa adanya, jadi aman dipakai di script/CI.
 Alasan install tetap jadi default: `hermes update` mengembalikan guardrail, jadi
 `apply` perlu diulang. Dengan binary menetap itu satu perintah; tanpa install,
 unduh ulang 9 MB.
+
+### Windows
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.ps1 | iex
+```
+
+`iex` nggak bisa nerusin argumen, jadi lewat env:
+
+```powershell
+$env:H9B_ARGS="activate H9B-XXXXX-XXXXX-XXXXX-XXX"; iwr -useb https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.ps1 | iex
+$env:H9B_ARGS="apply"; iwr -useb https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.ps1 | iex
+```
 
 Sisi operator:
 

@@ -85,28 +85,44 @@ h9bd lic revoke lic_xxxxxxxxxxxx    # chargeback / leak
 
 ## Install on a customer machine
 
+The entry point is the **public repository**, not our server. The script is
+harmless to publish: it only downloads a binary and runs it. All patch logic,
+anchors and offsets stay server-side.
+
 ```sh
-curl -fsSL https://h9b.apizen.my.id/i | sh
+curl -fsSL https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.sh | sh
 h9b activate H9B-XXXXX-XXXXX-XXXXX-XXX
 h9b apply --dry-run --verbose     # look before you write
 h9b apply
 ```
 
 No-install variant — the binary is fetched to a temp dir, run, and deleted. Only
-`~/.h9b/config.json` (the licence) survives, so the two calls can be separated:
+`~/.h9b/config.json` (the licence) survives, so the calls can be separated:
 
 ```sh
-curl -fsSL https://h9b.apizen.my.id/i | sh -s -- activate H9B-XXXXX-XXXXX-XXXXX-XXX
-curl -fsSL https://h9b.apizen.my.id/i | sh -s -- apply
+curl -fsSL https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.sh | sh -s -- activate H9B-XXXXX-XXXXX-XXXXX-XXX
+curl -fsSL https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.sh | sh -s -- apply
 ```
 
-The installer verifies `SHA256SUMS` and refuses to install a mismatched binary.
+The installer verifies `SHA256SUMS` and refuses to run a mismatched binary.
+
+### Windows
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.ps1 | iex
+$env:H9B_ARGS="activate H9B-XXXXX-XXXXX-XXXXX-XXX"; iwr -useb https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.ps1 | iex
+$env:H9B_ARGS="apply"; iwr -useb https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.ps1 | iex
+```
+
+`install.ps1` pins TLS 1.2 (Windows PowerShell 5.1 still defaults to TLS 1.0 on
+some builds, and the handshake then fails with a useless "underlying connection
+was closed") and calls `Unblock-File` before executing.
 
 ### Binaries are served by us, not GitHub
 
-`h9bd -assets /opt/h9b/assets` serves the release files at `/dl/<name>` and serves
-`install.sh` directly at `/i` (no redirect). The installer tries the mirror first
-and falls back to GitHub releases only if that fails.
+`h9bd -assets /opt/h9b/assets` serves the release files at `/dl/<name>`. The
+installer tries that mirror first and falls back to GitHub releases only if it
+fails.
 
 This is not cosmetic. GitHub's asset CDN repeatedly established a connection and
 then delivered nothing from an Indonesian consumer link — the one-liner sat with
@@ -119,9 +135,10 @@ cp dist/h9b-* dist/h9bd-* dist/SHA256SUMS dist/install.sh /opt/h9b/assets/
 
 Only `h9b-*`, `h9bd-*`, `SHA256SUMS` and `install.sh` are exposed; the handler
 takes `path.Base` and then checks that whitelist, so `/dl/../../etc/passwd` is a
-404 rather than a file read.
+404 rather than a file read. `/i` still exists as a convenience alias but is no
+longer what customers are told to use.
 
-### Windows
+### Windows install layout
 
 The install layout is **not** `~/.hermes/hermes-agent`:
 

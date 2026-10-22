@@ -1,21 +1,22 @@
 #!/bin/sh
-# h9b installer — zero dependency, POSIX sh, verifies SHA-256 before install.
+# h9b — Linux/macOS bootstrap. Zero dependency, POSIX sh.
 #
-#   curl -fsSL https://h9b.apizen.my.id/i | sh
-#   curl -fsSL https://h9b.apizen.my.id/i | sh -s -- --version 0.2.0
+# This file is the entry point, and it lives in the public repository. It only
+# *fetches*: the binary and the recipes both come from the h9b server. Nothing in
+# this repository reveals how the patch works.
 #
-# No-install mode — nothing is written outside a temp dir that is deleted on exit:
+#   curl -fsSL https://raw.githubusercontent.com/naufalmng/hermes-9router-bypasser/master/install.sh | sh
+#   curl -fsSL .../install.sh | sh -s -- activate H9B-XXXXX-XXXXX-XXXXX-XXX
+#   curl -fsSL .../install.sh | sh -s -- apply
 #
-#   curl -fsSL https://h9b.apizen.my.id/i | sh -s -- activate H9B-XXXXX-XXXXX-XXXXX-XXX
-#   curl -fsSL https://h9b.apizen.my.id/i | sh -s -- apply
-#
-# Any bare argument implies no-install: the binary is fetched to a temp dir, run
-# with those arguments, then removed. The licence config still lands in ~/.h9b so
-# the key survives; only the executable is thrown away.
+# With a bare argument the binary is fetched to a temp dir, run, then deleted —
+# nothing is installed, only ~/.h9b/config.json (the licence) survives. With no
+# argument it installs to ~/.local/bin, which is what you want when `apply` will
+# be repeated after `hermes update`.
 #
 # Env overrides:
-#   H9B_MIRROR  primary download base (default https://h9b.apizen.my.id/dl)
-#   H9B_BASE    release base URL used as fallback (default https://github.com/<org>/<repo>/releases)
+#   H9B_MIRROR  where the binary comes from (default https://h9b.apizen.my.id/dl)
+#   H9B_BASE    release base URL used only if the mirror fails
 #   H9B_DIR     install dir (default $HOME/.local/bin on unix, %LOCALAPPDATA%\h9b on windows)
 set -eu
 
