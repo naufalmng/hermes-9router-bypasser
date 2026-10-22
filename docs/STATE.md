@@ -55,6 +55,83 @@ have been a dev build that accepts payloads from any relay. `SERVERID` is now
 required by the target and by CI (`H9B_SERVERID` secret); building without it
 fails loudly instead of shipping an unauthenticated client.
 
+## 2026-10-22 — hardware lock: 2-of-3 quorum over machine, MAC, disk
+
+A single-value binding was wrong in both directions, so it is now three
+components with a quorum:
+
+```
+machine   Windows MachineGuid        Linux /etc/machine-id
+mac       Get-NetAdapter -Physical   /sys/class/net/*/address (physical only)
+disk      Win32_DiskDrive serial     physical disk serial/WWID (walks LVM/LUKS/md)
+```
+
+Two of three must match. Hashing only the MAC locks out a customer who plugs in a
+dock or installs a VPN client; hashing only machine-id is worthless because that
+file is root-writable and travels with a cloned image — the exact sharing the lock
+exists to stop.
+
+**The stored set is an anchor, not a snapshot.** The first implementation
+refreshed it on tolerated drift, which is a slow-motion bypass: swap the NIC
+(2/3, accept), swap the disk (2/3 against the refreshed set, accept), swap the
+machine id (2/3, accept) — the licence has now walked onto unrelated hardware one
+component at a time. It never refreshes now, so every comparison is against the
+box the licence was sold for. Two of three components replaced needs an operator
+`h9bd lic rebind`.
+
+### Proven against the live endpoint
+
+A Python replay of `/v1/activate` (same peppered hashing, verified by reproducing
+the binary's composite exactly) with a real issued key:
+
+```
+ALLOW  200  all three match                       pro
+ALLOW  200  nic swapped (2/3)                     pro
+ALLOW  200  disk swapped (2/3)                    pro
+REFUSE 403  only machine-id (1/3) — cloned image  bound_elsewhere
+REFUSE 403  nothing matches (0/3)                 bound_elsewhere
+```
+
+Drift walk, same key:
+
+```
+PASS  200  bind real hardware
+PASS  200  nic swapped
+PASS  403  nic + disk swapped          <- anchor held
+PASS  403  entirely new box
+PASS  200  real hardware again
+```
+
+A Windows-bound licence used from this Linux box:
+
+```
+REFUSED 403 licence bound to another machine (0/3 hardware components matched, 2 required)
+```
+
+### Bugs this round
+
+8. **Disk component vanished on LVM/LUKS.** `filepath.Base(findmnt SOURCE /)` is
+   `ubuntu--vg-ubuntu--lv`, which has no `/sys/block` entry, so the component was
+   silently dropped and the box bound on 2 of 3. Now walks the device stack with
+   `lsblk -s` (fallback: `/sys/class/block/*/slaves`) down to the physical disk,
+   then reads `device/serial` → `serial` → `device/wwid` → `wwid`.
+9. **`lsblk -sno` still emits tree glyphs** (`└─sda`), so the parsed name never
+   matched `/sys/block`. Needs `-r` (raw).
+10. **Anchor refresh enabled the drift walk** described above.
+11. **Pepper was the public default `h9b-dev-pepper`.** A leaked store would have
+    been brute-forceable back to customer MAC addresses (2^48 space). Release now
+    requires `PEPPER` and refuses to build without it; the value lives in
+    `/opt/h9b-secrets/pepper.txt` and must never rotate without a mass rebind.
+    Because this changed every hash, all existing licences were rebound.
+
+Windows after the change reports all three components and still applies cleanly:
+
+```
+hw disk 299ce22e   hw mac d04c0ce0   hw machine c7756f23   hw quorum 2 of 3 required
+bundle bundle-20261022 v1 — 0 applied, 5 already, 5 skipped, 0 failed
+SELESAI — 5/5 terverifikasi      exit 0
+```
+
 ## 2026-10-22 — tiers, one-shot verification, Windows+Linux only
 
 Product decisions from the owner, all four implemented:

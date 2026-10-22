@@ -23,10 +23,21 @@ server and are sealed to a live licence.
 
 Buys one CDK, sells "installations" to twenty people.
 
-*Gets:* one CDK binds one fingerprint. Second machine gets `409 cdk already bound`.
-Even if they share the token, `/v1/payload` compares `fp` against the bound value
-and rejects. Heartbeat `last_seen` per licence exposes a machine that changes
-fingerprint more than once a week.
+*Gets:* one CDK binds three hardware components (machine id, physical MACs, system
+disk serial) and the server demands a 2-of-3 match. A second machine scores 0/3 or
+1/3 and gets `403 bound_elsewhere`, with the count in the message so support can
+see why. Even if they share the token, `/v1/payload` compares against the bound
+licence and rejects.
+
+Copying the fingerprint is not enough: `/etc/machine-id` and `MachineGuid` are
+root-writable and travel inside a cloned image, so a machine-id-only lock would be
+defeated by exactly the attack it exists for. The MAC and disk components are read
+from hardware the clone does not carry.
+
+*Known limit:* a determined attacker with root on the original box can spoof a MAC
+address and, on some hardware, the disk serial. That costs them a VM plus a manual
+`ethtool -E`-style write per machine — more effort than buying a second CDK, which
+is the whole design goal. This is cost asymmetry, not impossibility.
 
 *Cost to win:* one CDK per machine, i.e. they become a customer.
 
@@ -77,7 +88,7 @@ stored — see *Known gaps*).
 | Build | garble `-tiny -literals`, `-trimpath`, `-s -w`, no DWARF | `Makefile` |
 | Transport | TLS 1.3, SPKI SHA-256 pin compiled in, optional private CA | `cmd/h9b/main.go` |
 | Crypto | per-request X25519 ephemeral, HKDF-SHA256, AES-256-GCM | `internal/kdf` |
-| Licence | CDK bound to machine fingerprint, one-shot | `internal/store` |
+| Licence | CDK bound to 3 hardware components, 2-of-3 quorum, anchor never moves | `internal/store` + `internal/fingerprint` |
 | Token | HMAC-SHA256, carries `lid`+`fp`+`exp`, verified per request | `internal/token` |
 | Replay | server-issued nonce, client nonce in KDF salt | `cmd/h9bd` |
 | Rate limit | min 3 s between payload fetches per fingerprint | `cmd/h9bd` |
@@ -94,8 +105,9 @@ stored — see *Known gaps*).
 2. **No offline grace.** Server down = no apply. Acceptable for a patch service,
    but a customer mid-`hermes update` will notice. Fix: cache the last bundle,
    encrypted, with a 24 h TTL.
-3. **Windows fingerprint** uses `MachineGuid` from the registry. Cloned VM images
-   share it. Fix: mix in the volume serial of `C:`.
+3. ~~**Windows fingerprint** uses `MachineGuid` from the registry. Cloned VM images
+   share it.~~ Closed: binding is now a 2-of-3 quorum over machine id, physical
+   MACs and the system disk serial, so a cloned image scores 1/3 and is refused.
 4. **No code signing** on the Windows binary. SmartScreen will complain. Fix:
    Authenticode certificate, ~$100/yr, worth it before charging money.
 5. **Single server.** No HA. Fine at this scale; note it in the SLA.

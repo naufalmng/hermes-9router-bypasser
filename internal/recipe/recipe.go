@@ -63,13 +63,13 @@ type Verify struct {
 
 // Recipe is one atomic patch unit.
 type Recipe struct {
-	ID      string  `json:"id"`
-	Title   string  `json:"title"`
-	Target  Target  `json:"target"`
-	Detect  *Detect `json:"detect,omitempty"`
-	Ops     []Op    `json:"ops"`
-	Verify  *Verify `json:"verify,omitempty"`
-	Notes   string  `json:"notes,omitempty"`
+	ID     string  `json:"id"`
+	Title  string  `json:"title"`
+	Target Target  `json:"target"`
+	Detect *Detect `json:"detect,omitempty"`
+	Ops    []Op    `json:"ops"`
+	Verify *Verify `json:"verify,omitempty"`
+	Notes  string  `json:"notes,omitempty"`
 }
 
 // Bundle is what the server seals and the client decrypts.

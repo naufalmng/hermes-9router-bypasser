@@ -2,9 +2,11 @@
 //
 // Build with garble so the strings and control flow are not readable:
 //
-//	garble -tiny -literals build -ldflags "-s -w -X main.pin=<spki>" ./cmd/h9b
+//	garble -tiny -literals build -tags pepperbuild \
+//	  -ldflags "-s -w -X main.serverID=<ed25519-pub-b64>" ./cmd/h9b
 //
-// The binary holds no patch data. It holds an interpreter and a TLS pin.
+// The binary holds no patch data. It holds an interpreter, the server's Ed25519
+// public key, and the pepper for the hardware fingerprint.
 package main
 
 import (
@@ -25,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -40,8 +43,10 @@ import (
 // at release time. A const would be inlined and un-settable.
 var clientVersion = "0.1.0-dev"
 
-// pin is the SPKI SHA-256 of the server certificate, injected at build time.
-// Empty means "no pinning" and is only acceptable for local testing.
+// pin is a legacy SPKI SHA-256 pin. Kept as an optional extra for deployments
+// that terminate TLS themselves; it is useless behind a Cloudflare tunnel, where
+// the certificate belongs to Cloudflare. Server authenticity comes from
+// serverID (Ed25519 transcript signature) instead.
 var pin = ""
 
 // serverID is the server's Ed25519 public key (base64), compiled in at release.
@@ -233,7 +238,7 @@ func cmdActivate(args []string) error {
 	fp := fingerprint.Get()
 	var out proto.ActivateResponse
 	if err := post(newClient(*insecure), strings.TrimRight(*server, "/")+"/v1/activate", fp, proto.ActivateRequest{
-		CDK: key, FP: fp, Platform: runtime.GOOS, Version: clientVersion,
+		CDK: key, FP: fp, HW: fingerprint.Components(), Platform: runtime.GOOS, Version: clientVersion,
 	}, &out); err != nil {
 		return err
 	}
@@ -362,8 +367,8 @@ func fetchBundle(cfg *config, insecure bool) (*recipe.Bundle, error) {
 	var out proto.PayloadResponse
 	if err := post(newClient(insecure), strings.TrimRight(cfg.Server, "/")+"/v1/payload", cfg.FP, proto.PayloadRequest{
 		Token: cfg.Token, FP: cfg.FP,
-		EphPub:  base64.StdEncoding.EncodeToString(eph.PublicKey().Bytes()),
-		Nonce:   nonceB64,
+		EphPub:   base64.StdEncoding.EncodeToString(eph.PublicKey().Bytes()),
+		Nonce:    nonceB64,
 		ClientTS: time.Now().Unix(),
 	}, &out); err != nil {
 		return nil, err
@@ -458,10 +463,27 @@ func cmdDoctor(args []string) error {
 	fmt.Printf("client     %s\ngo/runtime %s %s/%s\nconfig     %s\n",
 		clientVersion, runtime.Version(), runtime.GOOS, runtime.GOARCH, configPath())
 	fmt.Printf("machine    %s\n", fingerprint.Get())
-	if pin == "" {
-		fmt.Println("tls pin    NOT SET (dev build)")
+	// Show which components this box can prove. A customer whose licence was
+	// bound on a machine that could read its disk serial, then reinstalled a
+	// kernel that cannot, sees the component disappear here — which explains a
+	// refusal without reading server logs.
+	hw := fingerprint.Components()
+	names := make([]string, 0, len(hw))
+	for n := range hw {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		fmt.Printf("hw %-7s %s\n", n, hw[n][:8])
+	}
+	fmt.Printf("hw quorum  %d of %d required\n", fingerprint.Quorum, len(hw))
+	// The old TLS pin was replaced by Ed25519 transcript signing, because the
+	// Cloudflare tunnel terminates TLS and a SPKI pin would have pinned
+	// Cloudflare's key rather than ours. serverID is what actually matters now.
+	if serverID == "" {
+		fmt.Println("server auth NONE (dev build — payloads from any relay accepted)")
 	} else {
-		fmt.Printf("tls pin    %s…\n", pin[:16])
+		fmt.Printf("server auth ed25519 %s…\n", serverID[:12])
 	}
 	cfg, err := loadConfig()
 	if err != nil {

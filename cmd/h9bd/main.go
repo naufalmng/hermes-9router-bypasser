@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -105,16 +106,16 @@ func usage() {
 // ---------------------------------------------------------------- serve
 
 type server struct {
-	st        *store.Store
-	tokenKey  []byte
-	staticPub string
-	id        *identity.Identity
-	idPub     string
-	mu        sync.Mutex
-	lastFetch map[string]time.Time
+	st         *store.Store
+	tokenKey   []byte
+	staticPub  string
+	id         *identity.Identity
+	idPub      string
+	mu         sync.Mutex
+	lastFetch  map[string]time.Time
 	payloadDir string
-	bundle    *recipe.Bundle
-	bundleAt  time.Time
+	bundle     *recipe.Bundle
+	bundleAt   time.Time
 }
 
 func cmdServe(args []string) error {
@@ -276,20 +277,24 @@ func (s *server) handleActivate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "missing machine fingerprint", "bad_fp")
 		return
 	}
-	lic, err := s.st.Activate(req.CDK, req.FP, req.Platform)
+	lic, err := s.st.Activate(req.CDK, req.FP, req.Platform, req.HW)
 	if err != nil {
 		code := "refused"
-		switch err {
-		case store.ErrUnknownCDK:
+		switch {
+		case errors.Is(err, store.ErrUnknownCDK):
 			code = "unknown_cdk"
-		case store.ErrRevoked:
+		case errors.Is(err, store.ErrRevoked):
 			code = "revoked"
-		case store.ErrExpired:
+		case errors.Is(err, store.ErrExpired):
 			code = "expired"
-		case store.ErrFingerprint:
+		case errors.Is(err, store.ErrFingerprint):
 			code = "bound_elsewhere"
 		}
-		log.Printf("activate refused key=%s fp=%s code=%s", cdk.Mask(req.CDK), short(req.FP), code)
+		// Log which components arrived, never their values: enough to tell a
+		// genuinely different machine from a customer whose disk serial became
+		// unreadable after a kernel update.
+		log.Printf("activate refused key=%s fp=%s code=%s hw=%v",
+			cdk.Mask(req.CDK), short(req.FP), code, componentNames(req.HW))
 		writeErr(w, 403, err.Error(), code)
 		return
 	}
@@ -557,16 +562,25 @@ func cmdCDK(args []string) error {
 			fmt.Println(string(b))
 			return nil
 		}
-		fmt.Printf("%-20s %-18s %-8s %-10s %-8s %s\n", "MASK", "ID", "TIER", "EXPIRES", "APPLIES", "STATE")
+		fmt.Printf("%-20s %-18s %-8s %-10s %-8s %-4s %s\n",
+			"MASK", "ID", "TIER", "EXPIRES", "APPLIES", "HW", "BOUND / STATE")
 		for _, l := range list {
-			state := "active"
+			state := "unbound"
 			if l.Revoked {
 				state = "REVOKED"
 			} else if l.ExpiresAt > 0 && time.Now().Unix() > l.ExpiresAt {
 				state = "expired"
 			}
-			fmt.Printf("%-20s %-18s %-8s %-10s %-8d %s\n", l.CDKMask, l.ID, l.Tier,
-				time.Unix(l.ExpiresAt, 0).Format("2006-01-02"), l.Applies, state)
+			bound := "-"
+			if l.FP != "" {
+				bound = fmt.Sprintf("%s %s", l.Platform, short(l.FP))
+			}
+			// HW is how many hardware components the binding can prove. A 3 is
+			// the strongest (machine + mac + disk); 2 is still above quorum; 1
+			// means the licence is held by a single component and a rebind is
+			// worth doing next time the customer is on the line.
+			fmt.Printf("%-20s %-18s %-8s %-10s %-8d %-4d %s %s\n", l.CDKMask, l.ID, l.Tier,
+				time.Unix(l.ExpiresAt, 0).Format("2006-01-02"), l.Applies, len(l.HW), bound, state)
 		}
 		return nil
 	case "revoke":
@@ -780,13 +794,13 @@ func cmdCert(args []string) error {
 	}
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	tmpl := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: *host, Organization: []string{"H9B"}},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Duration(*days) * 24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     []string{*host},
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: *host, Organization: []string{"H9B"}},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Duration(*days) * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:              []string{*host},
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 	}
@@ -841,6 +855,18 @@ func short(s string) string {
 		return s[:8]
 	}
 	return s
+}
+
+// componentNames lists which hardware components a client reported, without
+// their values. Support needs to distinguish "the disk serial stopped being
+// readable" from "different machine", and the hashes say neither.
+func componentNames(hw map[string]string) []string {
+	out := make([]string, 0, len(hw))
+	for k := range hw {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func containsStr(list []string, v string) bool {

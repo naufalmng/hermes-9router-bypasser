@@ -113,12 +113,19 @@ fail the run. A missing file inside an installed app is a real failure and does.
 
 ```sh
 make garble-install                                   # pinned v0.12.1
-make release SERVERID=<b64-ed25519-pub> VERSION=0.1.0
+make release SERVERID=<b64-ed25519-pub> PEPPER=<stable-secret> VERSION=0.2.0
 ```
 
 Targets: `linux/amd64`, `linux/arm64`, `windows/amd64`. macOS is not built.
 
 `SERVERID` is mandatory: without it the client is a dev build that warns and does
 not authenticate the server, which would let a relay hand out its own payloads.
+
+`PEPPER` is mandatory and **must never change**: every hardware component is
+hashed with it, so rotating it makes every bound licence stop matching its own
+machine until each customer rebinds. Keep it in the release secret
+(`H9B_PEPPER`) and in `/opt/h9b-secrets/pepper.txt` on the operator machine.
+The default in source is a public placeholder; a leaked store hashed with it
+could be brute-forced back into customer MAC addresses.
 
 ## Server (h9bd) from scratch

@@ -22,7 +22,7 @@ func TestNormalizeAcceptsSloppyInput(t *testing.T) {
 		"spaces":       "  " + flat + "  ",
 		"prefixed":     Prefix + "-" + flat,
 		"dashed":       flat[0:5] + "-" + flat[5:10] + "-" + flat[10:15] + "-" + flat[15:],
-		"lower+dashed": lower(Prefix+"-"+flat[0:5] + "-" + flat[5:10] + "-" + flat[10:15] + "-" + flat[15:]),
+		"lower+dashed": lower(Prefix + "-" + flat[0:5] + "-" + flat[5:10] + "-" + flat[10:15] + "-" + flat[15:]),
 	}
 	for name, in := range cases {
 		if got := Normalize(in); got != flat {

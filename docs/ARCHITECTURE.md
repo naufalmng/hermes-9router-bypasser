@@ -29,13 +29,13 @@ reason there is nothing valuable behind it.
 ```
              ┌──────────────────────────────────────────────┐
    customer  │  h9b  (Go, garble-obfuscated, stripped)      │
-             │  ├── fingerprint   machine-id -> 16 hex      │
+             │  ├── fingerprint   3 hardware hashes         │
              │  ├── transport     TLS 1.3 + SPKI pin        │
              │  ├── handshake     X25519 eph-ephemeral      │
              │  ├── engine        replace/regex/insert      │
              │  └── state         ~/.h9b/config.json        │
              └───────────────┬──────────────────────────────┘
-                             │  POST /v1/activate   (CDK + fp)
+                             │  POST /v1/activate   (CDK + fp + hw)
                              │  POST /v1/payload    (token + fp + eph_pub)
                              ▼
              ┌──────────────────────────────────────────────┐
@@ -69,8 +69,28 @@ The CDK is stored as `sha256(normalised_cdk)`. The plaintext key exists only in
 the customer's inbox and in the response to `h9bd cdk new` — never in the
 database. A stolen `store.json` is a list of hashes and machine IDs.
 
-Binding is one-shot: first fingerprint wins. Re-imaging a machine therefore needs
-an operator `h9bd lic rebind`, which is the point — it is the support lever.
+Binding is a 2-of-3 quorum over hardware components, not a single value:
+
+```
+machine   MachineGuid / machine-id / IOPlatformUUID
+mac       sorted set of physical NIC addresses (virtual, bridge and tunnel excluded)
+disk      serial or WWID of the physical disk backing / (walks LVM, LUKS, mdraid)
+```
+
+Two must match. A single component fails in both directions: MAC-only locks out
+anyone who plugs in a dock or installs a VPN client, and machine-id-only is
+worthless because the file is root-writable and travels with a cloned image.
+
+The stored set is an **anchor**: it is written once, at first activation, and
+never rewritten on tolerated drift. Refreshing it would let the binding walk —
+swap the NIC (2/3), swap the disk (2/3 against the new set), swap the machine id
+(2/3) — three accepted steps to completely different hardware. Two of three
+components replaced therefore needs an operator `h9bd lic rebind`, which is the
+point: it is the support lever.
+
+Each component is stored as `sha256(pepper ‖ name ‖ raw)`. Raw MACs and serials
+never leave the machine, and the pepper (a release secret, stable across all
+versions) stops a leaked store from being brute-forced back into MAC addresses.
 
 ### 2. Payload — every run
 

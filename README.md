@@ -66,6 +66,33 @@ Ancaman dan batasannya: [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) —
 Filtering di **server**, sebelum enkripsi. Pelanggan Basic yang dump memori klien
 cuma nemu resep yang dia bayar. `basic` polos ditolak — namanya dipakai dua produk.
 
+### Lock: 1 CDK = 1 mesin
+
+Lisensi diikat ke **tiga komponen hardware**, bukan satu nilai:
+
+| komponen | Windows | Linux |
+|---|---|---|
+| `machine` | `MachineGuid` registry | `/etc/machine-id` |
+| `mac` | MAC fisik (`Get-NetAdapter -Physical`) | MAC fisik dari `/sys/class/net` |
+| `disk` | serial disk sistem | serial/WWID disk fisik (LVM/LUKS ditelusuri) |
+
+Server minta **quorum 2 dari 3**. Alasannya dua arah:
+
+- Hash MAC saja → pelanggan colok dock USB, ganti Wi-Fi, atau install VPN client, langsung terkunci dari lisensi yang sudah dia bayar.
+- Hash `/etc/machine-id` saja → kunci nggak ada gunanya: file itu bisa ditulis root dan ikut kebawa saat orang clone image/VM. Persis pembajakan yang mau dicegah.
+
+Dengan quorum: clone `machine-id` tetap ditolak karena MAC dan disk-nya beda; ganti satu NIC tetap jalan karena dua komponen lain cocok.
+
+Yang tersimpan di server cuma `SHA-256(pepper ‖ nama ‖ nilai)` — MAC dan serial asli tidak pernah keluar dari mesin pelanggan, dan pepper bikin store yang bocor nggak bisa di-brute-force balik jadi MAC address.
+
+**Anchor, bukan snapshot.** Set komponen yang tersimpan tidak pernah ditimpa saat ada drift. Kalau ditimpa, tiga pergantian kecil (NIC → disk → mesin) masing-masing 2/3 akan memindahkan lisensi ke hardware lain satu komponen sekali jalan. Sekarang perbandingan selalu ke mesin tempat lisensi dijual; ganti dua dari tiga komponen = perlu `h9bd lic rebind`.
+
+```sh
+h9bd lic list                      # kolom HW = jumlah komponen yang bisa dibuktikan
+h9bd lic show lic_xxx              # JSON, termasuk komponennya
+h9bd lic rebind lic_xxx            # pelanggan reinstall / ganti 2 komponen
+```
+
 ### Verifikasi (rampung atau belum)
 
 Tidak ada timer, tidak ada daemon di mesin pelanggan. Satu kali jalan, lalu
@@ -192,6 +219,9 @@ Read [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md). The short version:
   server-side and sealed to a live licence.
 - A customer who buys a licence and dumps the decrypted bundle gets one stale
   snapshot of recipe data. That is the accepted, documented trade-off.
+- A licence is bound to three hardware components with a 2-of-3 quorum, and the
+  stored set is an anchor that never moves. Cloning a machine image does not
+  carry the licence; replacing one NIC does not break it.
 - What is *not* defended, and why, is listed explicitly in that document.
 
 ### License

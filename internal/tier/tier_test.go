@@ -41,17 +41,17 @@ func TestAllows(t *testing.T) {
 
 func TestNormalize(t *testing.T) {
 	ok := map[string]string{
-		"pro":            Pro,
-		"PRO":            Pro,
-		"both":           Pro,
-		"basic-hermes":   Hermes,
-		"hermes":         Hermes,
-		"Basic_Hermes":   Hermes,
-		"basic-router9":  Router9,
-		"router9":        Router9,
-		"9router":        Router9,
-		"basic-9router":  Router9,
-		"  pro  ":        Pro,
+		"pro":           Pro,
+		"PRO":           Pro,
+		"both":          Pro,
+		"basic-hermes":  Hermes,
+		"hermes":        Hermes,
+		"Basic_Hermes":  Hermes,
+		"basic-router9": Router9,
+		"router9":       Router9,
+		"9router":       Router9,
+		"basic-9router": Router9,
+		"  pro  ":       Pro,
 	}
 	for in, want := range ok {
 		got, err := Normalize(in)

@@ -7,10 +7,11 @@ package proto
 
 // ActivateRequest binds a CDK to a machine fingerprint.
 type ActivateRequest struct {
-	CDK      string `json:"cdk"`
-	FP       string `json:"fp"`
-	Platform string `json:"platform"` // linux | windows | darwin
-	Version  string `json:"version"`  // client build, for min-version gating
+	CDK      string            `json:"cdk"`
+	FP       string            `json:"fp"`
+	HW       map[string]string `json:"hw,omitempty"` // machine | mac | disk -> peppered hash
+	Platform string            `json:"platform"`     // linux | windows
+	Version  string            `json:"version"`      // client build, for min-version gating
 }
 
 // ActivateResponse hands back a bearer token.
@@ -31,12 +32,12 @@ type ActivateResponse struct {
 // decrypted later even with the client binary fully reversed, because the
 // server's ephemeral private half is discarded after the response is written.
 type PayloadRequest struct {
-	Token    string `json:"token"`
-	FP       string `json:"fp"`
-	EphPub   string `json:"eph_pub"`
+	Token    string   `json:"token"`
+	FP       string   `json:"fp"`
+	EphPub   string   `json:"eph_pub"`
 	Targets  []string `json:"targets,omitempty"` // requested recipe set, empty = all
-	Nonce    string `json:"nonce"`
-	ClientTS int64  `json:"client_ts"`
+	Nonce    string   `json:"nonce"`
+	ClientTS int64    `json:"client_ts"`
 }
 
 // PayloadResponse carries the sealed bundle.
@@ -62,10 +63,10 @@ type PayloadResponse struct {
 // drift visible: when upstream rewrites a file we learn the exact anchor that
 // disappeared, then push a new recipe to every licence without a new release.
 type ReportRequest struct {
-	Token   string       `json:"token"`
-	FP      string       `json:"fp"`
-	BundleID string      `json:"bundle_id"`
-	Results []RecipeResult `json:"results"`
+	Token    string         `json:"token"`
+	FP       string         `json:"fp"`
+	BundleID string         `json:"bundle_id"`
+	Results  []RecipeResult `json:"results"`
 }
 
 // RecipeResult is one recipe's outcome on the customer machine.

@@ -2,8 +2,18 @@ SHELL := /bin/bash
 VERSION ?= 0.1.0
 PIN ?=
 SERVERID ?=
+# Pepper for the hardware fingerprint. MUST be identical across every release:
+# changing it re-hashes every component and every bound licence stops matching
+# its own machine. Store it once, keep it in the release secret.
+PEPPER ?=
 GOFLAGS := -trimpath
 LDFLAGS := -s -w -X main.pin=$(PIN) -X main.serverID=$(SERVERID) -X main.clientVersion=$(VERSION)
+# The pepper is NOT stamped with -X. -X writes the raw bytes into the symbol
+# table, where `strings h9b | grep <pepper>` finds it in one command and garble
+# cannot help. Instead `release` generates pepper_gen.go (build tag
+# `pepperbuild`) with the value as a string literal, which garble's -literals
+# pass stores encrypted. The dev default lives in pepper_default.go.
+PEPPERGEN := internal/fingerprint/pepper_gen.go
 GARBLE_VER := v0.12.1
 GARBLE := $(shell command -v garble 2>/dev/null || echo $(HOME)/go/bin/garble)
 HOSTARCH := $(shell go env GOARCH)
@@ -66,14 +76,21 @@ release:
 	  echo "SERVERID required: make release SERVERID=<ed25519-pub-b64>"; \
 	  echo "  (a build without it warns at runtime and does NOT authenticate the server)"; \
 	  exit 1; fi
+	@if [ -z "$(PEPPER)" ]; then \
+	  echo "PEPPER required: make release PEPPER=<stable-random-string>"; \
+	  echo "  (the default pepper is public, so a leaked licence store could be"; \
+	  echo "   brute-forced back into customer MAC addresses)"; \
+	  exit 1; fi
 	@mkdir -p $(DIST)
 	@rm -f $(DIST)/*
-	@for t in $(TARGETS); do \
+	@printf 'package fingerprint\n\nconst pepperBuild = "%s"\n' '$(PEPPER)' > $(PEPPERGEN)
+	@trap 'rm -f $(PEPPERGEN)' EXIT; \
+	for t in $(TARGETS); do \
 	  os=$${t%/*}; arch=$${t#*/}; ext=""; \
 	  [ "$$os" = "windows" ] && ext=".exe"; \
 	  echo "  -> $$os/$$arch"; \
 	  GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GARBLE) -tiny -literals \
-	    build $(GOFLAGS) -ldflags "$(LDFLAGS)" \
+	    build $(GOFLAGS) -tags pepperbuild -ldflags "$(LDFLAGS)" \
 	    -o $(DIST)/h9b-$$os-$$arch$$ext ./cmd/h9b || exit 1; \
 	done
 	env GOOS=linux CGO_ENABLED=0 go build $(GOFLAGS) -ldflags "-s -w" \

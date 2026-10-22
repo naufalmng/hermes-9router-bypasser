@@ -21,13 +21,13 @@ import (
 // Both must pass. A marker without syntax means we corrupted the file; syntax
 // without a marker means the patch silently did nothing.
 type Check struct {
-	ID     string `json:"id"`
-	Path   string `json:"path"`
-	Marker bool   `json:"marker"`
-	Syntax bool   `json:"syntax"`
+	ID         string `json:"id"`
+	Path       string `json:"path"`
+	Marker     bool   `json:"marker"`
+	Syntax     bool   `json:"syntax"`
 	SyntaxKind string `json:"syntax_kind"` // python | node | skipped
-	Detail string `json:"detail,omitempty"`
-	OK     bool   `json:"ok"`
+	Detail     string `json:"detail,omitempty"`
+	OK         bool   `json:"ok"`
 }
 
 // VerifyAll re-reads every file the run claims to have handled.

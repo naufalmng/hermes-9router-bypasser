@@ -21,35 +21,37 @@ import (
 	"time"
 
 	"github.com/apizen/h9b/internal/cdk"
+	"github.com/apizen/h9b/internal/fingerprint"
 	"github.com/apizen/h9b/internal/proto"
 )
 
 // Errors returned by Activate.
 var (
-	ErrUnknownCDK = errors.New("cdk not issued")
-	ErrRevoked    = errors.New("licence revoked")
-	ErrExpired    = errors.New("licence expired")
+	ErrUnknownCDK  = errors.New("cdk not issued")
+	ErrRevoked     = errors.New("licence revoked")
+	ErrExpired     = errors.New("licence expired")
 	ErrFingerprint = errors.New("licence bound to another machine")
-	ErrSeats      = errors.New("seat limit reached")
+	ErrSeats       = errors.New("seat limit reached")
 )
 
 // License is one issued key.
 type License struct {
-	ID        string `json:"id"`
-	CDKHash   string `json:"cdk_hash"` // sha256(normalized cdk); plaintext is never stored
-	CDKMask   string `json:"cdk_mask"` // H9B-AB***-***-***-XYZ for support
-	FP        string `json:"fp"`
-	Platform  string `json:"platform"`
-	Tier      string `json:"tier"`
-	CreatedAt int64  `json:"created_at"`
-	ExpiresAt int64  `json:"expires_at"`
-	Revoked   bool   `json:"revoked"`
-	RevokedAt int64  `json:"revoked_at,omitempty"`
-	LastSeen  int64  `json:"last_seen"`
-	Applies   int    `json:"applies"`
-	BundleID  string `json:"bundle_id,omitempty"`
+	ID         string               `json:"id"`
+	CDKHash    string               `json:"cdk_hash"` // sha256(normalized cdk); plaintext is never stored
+	CDKMask    string               `json:"cdk_mask"` // H9B-AB***-***-***-XYZ for support
+	FP         string               `json:"fp"`
+	HW         map[string]string    `json:"hw,omitempty"` // per-component hashes: machine, mac, disk
+	Platform   string               `json:"platform"`
+	Tier       string               `json:"tier"`
+	CreatedAt  int64                `json:"created_at"`
+	ExpiresAt  int64                `json:"expires_at"`
+	Revoked    bool                 `json:"revoked"`
+	RevokedAt  int64                `json:"revoked_at,omitempty"`
+	LastSeen   int64                `json:"last_seen"`
+	Applies    int                  `json:"applies"`
+	BundleID   string               `json:"bundle_id,omitempty"`
 	LastReport []proto.RecipeResult `json:"last_report,omitempty"`
-	Note      string `json:"note,omitempty"`
+	Note       string               `json:"note,omitempty"`
 }
 
 // Store is the persisted state.
@@ -210,7 +212,13 @@ func (s *Store) Get(id string) (*License, bool) {
 // Activate binds a key to a fingerprint. Re-activating the same machine is a
 // no-op; a different fingerprint is refused, which is what makes a leaked key
 // worthless to the second person who tries it.
-func (s *Store) Activate(key, fp, platform string) (*License, error) {
+// Activate binds a CDK to a machine, or confirms it is already bound to this one.
+//
+// Binding is a quorum over hardware components, not a single value: see
+// internal/fingerprint for why. A licence that was bound before components were
+// recorded (HW == nil) is upgraded in place on the next successful activate, so
+// existing customers keep working across this change.
+func (s *Store) Activate(key, fp, platform string, hw map[string]string) (*License, error) {
 	h := HashCDK(key)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -227,11 +235,40 @@ func (s *Store) Activate(key, fp, platform string) (*License, error) {
 	if l.ExpiresAt > 0 && now > l.ExpiresAt {
 		return nil, ErrExpired
 	}
-	if l.FP == "" {
+	switch {
+	case l.FP == "":
+		// First activation: bind.
 		l.FP = fp
+		l.HW = hw
 		l.Platform = platform
-	} else if l.FP != fp {
-		return nil, ErrFingerprint
+	case len(l.HW) == 0:
+		// Legacy binding from before hardware components existed. The composite
+		// fingerprint must still match, otherwise this would let any machine
+		// adopt an old licence.
+		if l.FP != fp {
+			return nil, ErrFingerprint
+		}
+		l.HW = hw
+	default:
+		matched, ok := fingerprint.Verify(l.HW, hw)
+		if !ok {
+			return nil, fmt.Errorf("%w (%d/%d hardware components matched, %d required)",
+				ErrFingerprint, matched, len(l.HW), fingerprint.Quorum)
+		}
+		// Deliberately do NOT rewrite l.HW here.
+		//
+		// The stored set is an anchor, not a rolling snapshot. Refreshing it on
+		// every tolerated drift looks harmless, but each step only needs 2 of 3
+		// to match: swap the NIC (mac becomes new), then swap the disk (disk
+		// becomes new), then the machine id — three steps, each accepted, and
+		// the licence now lives on completely different hardware. Keeping the
+		// anchor means every comparison is against the box the licence was
+		// actually sold for, so drift cannot accumulate.
+		//
+		// Cost: a customer who replaces two of three components needs an
+		// operator rebind. That is one `h9bd lic rebind` command, and it is the
+		// right side to err on.
+		l.FP = fp
 	}
 	l.LastSeen = now
 	if err := s.saveLocked(); err != nil {
@@ -284,6 +321,7 @@ func (s *Store) Rebind(id string) error {
 		return ErrUnknownCDK
 	}
 	l.FP = ""
+	l.HW = nil
 	l.Platform = ""
 	return s.saveLocked()
 }

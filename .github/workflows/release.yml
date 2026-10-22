@@ -11,6 +11,10 @@ name: release
 # Without H9B_SERVERID the build is a dev build: it warns at runtime and does not
 # authenticate the server, so payloads would be accepted from any relay. The
 # release target refuses to build without it.
+#
+#   H9B_PEPPER    pepper for the hardware fingerprint. Set it once and never
+#                 change it: every bound licence is hashed with it, so rotating
+#                 it locks out every existing customer until they rebind.
 
 on:
   push:
@@ -48,10 +52,11 @@ jobs:
       - name: build release
         env:
           SERVERID: ${{ secrets.H9B_SERVERID }}
+          PEPPER: ${{ secrets.H9B_PEPPER }}
         run: |
           VERSION="${{ github.event.inputs.version || github.ref_name }}"
           VERSION="${VERSION#v}"
-          make release SERVERID="$SERVERID" VERSION="$VERSION"
+          make release SERVERID="$SERVERID" PEPPER="$PEPPER" VERSION="$VERSION"
 
       - name: upload artifacts
         uses: actions/upload-artifact@v4

@@ -32,8 +32,8 @@ func TestTranscriptIsBound(t *testing.T) {
 	sig := id.Sign("lic_abc", "clientEph", "serverEph", "nonce")
 
 	cases := []struct {
-		name                                       string
-		lic, cliEph, srvEph, nonce                 string
+		name                       string
+		lic, cliEph, srvEph, nonce string
 	}{
 		{"other licence", "lic_other", "clientEph", "serverEph", "nonce"},
 		{"other client key", "lic_abc", "clientEph2", "serverEph", "nonce"},
