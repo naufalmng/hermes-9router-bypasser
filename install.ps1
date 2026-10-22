@@ -79,7 +79,11 @@ try {
   # identifier makes execution fail on machines with a strict policy.
   Unblock-File -Path $exe -ErrorAction SilentlyContinue
 
-  $argv = $ArgsStr -split '\s+' | Where-Object { $_ -ne '' }
+  # @(...) is load-bearing. `-split` on a single word returns a scalar string
+  # through the pipeline, and splatting a string in PowerShell enumerates it as
+  # IEnumerable<char> — so `h9b apply` arrived as a,p,p,l,y and the binary said
+  # `unknown command "a"`.
+  $argv = @($ArgsStr -split '\s+' | Where-Object { $_ -ne '' })
   Write-Host "  running: h9b $ArgsStr" -ForegroundColor DarkGray
   Write-Host ''
 
