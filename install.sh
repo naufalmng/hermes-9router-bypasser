@@ -55,13 +55,21 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 echo "  fetching $asset ($VERSION)"
-if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$url" -o "$tmp/h9b" || { echo "download failed: $url" >&2; exit 1; }
-  curl -fsSL "$sums_url" -o "$tmp/SHA256SUMS" 2>/dev/null || true
-else
-  wget -qO "$tmp/h9b" "$url" || { echo "download failed: $url" >&2; exit 1; }
-  wget -qO "$tmp/SHA256SUMS" "$sums_url" 2>/dev/null || true
-fi
+
+# Timeouts are not optional. A customer on a flaky link would otherwise sit at a
+# silent hang forever — the first version of this script had no timeout and did
+# exactly that on GitHub's asset CDN. Three tries, 20 s connect, 300 s total.
+fetch() { # fetch <url> <out>
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 20 --max-time 300 \
+      --retry 3 --retry-delay 2 --retry-connrefused "$1" -o "$2"
+  else
+    wget -q --timeout=20 --tries=3 -O "$2" "$1"
+  fi
+}
+
+fetch "$url" "$tmp/h9b" || { echo "download failed: $url" >&2; exit 1; }
+fetch "$sums_url" "$tmp/SHA256SUMS" 2>/dev/null || true
 
 if [ -s "$tmp/SHA256SUMS" ]; then
   want=$(grep " $asset\$" "$tmp/SHA256SUMS" | awk '{print $1}')
