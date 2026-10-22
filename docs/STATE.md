@@ -25,6 +25,11 @@ python3 scan_for_threats('notes.md')   -> ['prompt_injection']    (still scanned
 garble build verified: sensitive-string count 69 -> 1, symbol table empty,
 binary 9.1 MB vs 5.5 MB plain (obfuscation costs size; worth it).
 
+garble version trap: `go install mvdan.cc/garble@latest` builds a binary that
+requires Go >= 1.27 and exits instantly on this box (Go 1.22.2). Pinned to
+`v0.12.1` in the Makefile (`make garble-install`). The failure mode is nasty —
+it overwrites the working binary, so the next release build silently fails.
+
 Deployment choices worth remembering:
 
 - **Second tunnel, not a new ingress rule.** `bojongkulur-edge` carries

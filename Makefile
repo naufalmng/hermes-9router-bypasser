@@ -4,14 +4,22 @@ PIN ?=
 SERVERID ?=
 GOFLAGS := -trimpath
 LDFLAGS := -s -w -X main.pin=$(PIN) -X main.serverID=$(SERVERID) -X main.clientVersion=$(VERSION)
+GARBLE_VER := v0.12.1
 GARBLE := $(shell command -v garble 2>/dev/null || echo $(HOME)/go/bin/garble)
 HOSTARCH := $(shell go env GOARCH)
+
+# garble @latest requires Go >= 1.27; this project targets Go 1.22, so the
+# version is pinned. `go install mvdan.cc/garble@latest` silently replaces the
+# working binary with one that refuses to run — hence this target.
+garble-install:
+	go install mvdan.cc/garble@$(GARBLE_VER)
+	@$(GARBLE) version | head -1
 
 BIN := bin
 DIST := dist
 TARGETS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
 
-.PHONY: all build test vet fmt payload check release clean install-cli
+.PHONY: all build test vet fmt payload check release clean install-cli garble-install
 
 all: build
 
