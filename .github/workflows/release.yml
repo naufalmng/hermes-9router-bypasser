@@ -66,3 +66,4 @@ jobs:
           files: |
             dist/h9b-*
             dist/SHA256SUMS
+            install.sh

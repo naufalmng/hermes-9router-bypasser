@@ -101,4 +101,4 @@ esac
 echo
 echo "next:"
 echo "  h9b activate H9B-XXXXX-XXXXX-XXXXX-XXX"
-echo "  h9b apply"
+echo "  h9b apply          # satu kali jalan, ditutup verifikasi: SELESAI / BELUM SELESAI"
