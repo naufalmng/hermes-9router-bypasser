@@ -37,22 +37,52 @@ Kerjaan patch manual tadi punya tiga masalah nyata:
    9router anchor-nya geser.
 
 h9b jawab ketiganya: `detect` bikin idempotent, semua-atau-tidak-sama-sekali
-per resep (nggak ada file setengah jadi), dan `h9b watch` / systemd timer
-nge-apply ulang otomatis.
+per resep (nggak ada file setengah jadi), dan tiap run ditutup **verifikasi**
+yang jawab satu pertanyaan: rampung atau belum. Sekali jalan per mesin, selesai.
 
 ### Arsitektur singkat
 
 | Lapisan | Isi | Ada di mana |
 |---|---|---|
-| Klien | 4 MB Go, garble-obfuscated, stripped | mesin pelanggan |
-| Transport | TLS 1.3 + SPKI pin | keduanya |
+| Klien | 9 MB Go, garble-obfuscated, stripped, tanpa resep | mesin pelanggan |
+| Transport | TLS 1.3 (Cloudflare-friendly) | keduanya |
+| Auth server | Ed25519 atas transcript, diverifikasi sebelum dekripsi | kunci privat di server |
 | Kunci payload | X25519 ephemeral per request + HKDF + AES-256-GCM | negosiasi |
 | Resep | anchor + replacement (JSON) | **server saja** |
-| Lisensi | CDK → hash → ikatan fingerprint | server saja |
+| Lisensi | CDK → hash → ikatan fingerprint, per tier | server saja |
 
 Detail lengkap: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 Ancaman dan batasannya: [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) —
 **baca ini sebelum jualan**, ada daftar gap yang jujur.
+
+### Tier
+
+| flag | produk | resep yang dikirim |
+|---|---|---|
+| `basic-hermes` | Basic | `hg-*` saja |
+| `basic-router9` | Basic | `r9-*` saja |
+| `pro` | Pro | keduanya |
+
+Filtering di **server**, sebelum enkripsi. Pelanggan Basic yang dump memori klien
+cuma nemu resep yang dia bayar. `basic` polos ditolak — namanya dipakai dua produk.
+
+### Verifikasi (rampung atau belum)
+
+Tidak ada timer, tidak ada daemon di mesin pelanggan. Satu kali jalan, lalu
+ditutup pemeriksaan:
+
+```
+verifikasi
+  ok   hg-threat-patterns
+  ok   r9-codebuddy-cn
+
+SELESAI — 10/10 terverifikasi
+```
+
+Tiap target dicek dua hal: **marker** (teks hasil patch benar-benar ada di file)
+dan **syntax** (file masih bisa di-parse interpreter-nya sendiri — `python -c
+compile` untuk `.py`, `node --check` untuk `.js`, pakai venv Hermes-nya). Exit 0 =
+rampung. Kalau gagal: `BELUM SELESAI — 2/10 gagal: hg-cron-scan, r9-mimo-free`.
 
 ### Yang dilindungi
 
@@ -69,15 +99,16 @@ h9b apply --dry-run -v      # lihat dulu, nggak nulis
 h9b status                  # lisensi + file yang kena
 h9b doctor                  # diagnosa: server, pin, fingerprint, target
 h9b rollback                # balikin ke stock (backup .h9b-<ts>)
-h9b watch --interval 60     # apply ulang otomatis
 ```
 
 Sisi operator:
 
 ```bash
-h9bd cdk new -n 10 -tier pro -days 30 -note "batch-11"
+h9bd cdk new -tier pro -days 30 -note "ORDER-1234"   # basic-hermes | basic-router9 | pro
 h9bd lic list
 h9bd lic show lic_xxxx
+h9bd lic extend lic_xxxx -days 30   # perpanjang (manual, abis bayar)
+h9bd lic note lic_xxxx "ORDER-1234"
 h9bd cdk revoke -cdk H9B-...
 h9bd lic rebind lic_xxxx     # pelanggan ganti mesin
 h9bd payload check -dir ./payloads
@@ -89,7 +120,7 @@ kill -HUP $(pidof h9bd)      # reload resep tanpa downtime
 ```bash
 make build                          # binary biasa (buat mesin sendiri)
 make payload R9VER=0.5.95           # regenerate resep dari tarball pristine
-make release PIN=<spki> VERSION=0.1.0   # cross-compile + garble + SHA256SUMS
+make release SERVERID=<b64-pub> VERSION=0.1.0   # linux+windows, garble, SHA256SUMS
 ```
 
 `make release` butuh `garble`:
@@ -130,8 +161,9 @@ The manual patching workflow had three real defects:
    moves its anchors every release.
 
 h9b fixes all three: `detect` markers make apply idempotent, each recipe is
-all-or-nothing so a missed anchor never writes a half-patched file, and
-`h9b watch` / a systemd timer re-applies on drift.
+all-or-nothing so a missed anchor never writes a half-patched file, and every run
+ends with a verification pass that answers one question — done or not done. One
+run per machine, then it is finished.
 
 ### Layout
 

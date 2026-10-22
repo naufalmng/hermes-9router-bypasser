@@ -7,11 +7,81 @@ https://h9b.apizen.my.id        Cloudflare tunnel -> 127.0.0.1:18090
 ```
 
 Server: `h9bd.service` at `/opt/h9b`, payloads in `/opt/h9b/payloads`, identity
-key in `/opt/h9b/data/server.ed25519`. Tunnel: separate `cloudflared-h9b.service`
-so a restart never touches the tunnel carrying SSH.
+key in `/opt/h9b/data/server.ed25519`.
 
-Operator runbook lives outside this repo (it holds the identity public key and
-host specifics).
+## One run per machine, then it is done
+
+There is **no timer and no daemon on the customer side**. `h9b apply` is a single
+one-shot run that ends with a verification pass, and the last line answers the
+only question the customer has:
+
+```
+verifikasi
+  ok   hg-threat-patterns             
+  ok   hg-cron-scan                   
+  ok   r9-codebuddy-cn                
+
+SELESAI — 10/10 terverifikasi
+```
+
+Exit code 0 means verified, non-zero means not done. If something is wrong the
+line reads `BELUM SELESAI — 2/10 gagal: hg-cron-scan, r9-mimo-free` and the
+per-recipe reason is printed above it.
+
+What each target is checked for:
+
+- **marker** — the replacement text is actually in the file (the patch landed)
+- **syntax** — the file still parses with its own interpreter (`python -c compile`
+  for `.py`, `node --check` for `.js`), using the venv next to the Hermes install
+  so the check runs on the interpreter that will actually import the file
+
+Nothing is written by the verification pass: the Python check compiles the bytes
+in memory instead of `py_compile`, so no `__pycache__` appears in the customer's
+tree.
+
+`h9b apply --dry-run` shows what would change and skips verification.
+`h9b apply --no-verify` writes without checking — for debugging only.
+
+If Hermes is later updated and the patch is reverted, the customer runs
+`h9b apply` again. It is idempotent: already-patched targets report `already`.
+
+## Tiers
+
+| tier flag | product | recipes received |
+|---|---|---|
+| `basic-hermes` | Basic | `hg-*` only |
+| `basic-router9` | Basic | `r9-*` only |
+| `pro` | Pro | both |
+
+Filtering happens on the **server**, before encryption. A Basic customer who dumps
+the client's memory finds only the recipes they paid for. Bare `basic` is refused
+because it names two products.
+
+## Selling: manual, by CLI
+
+Payment is confirmed by hand, then the operator issues the key:
+
+```sh
+h9bd cdk new -tier pro -days 30 -note "ORDER-1234 @buyer" -store /opt/h9b/data/store.json
+# H9B-XXXXX-XXXXX-XXXXX-XXX   lic_xxxxxxxxxxxx   pro   Pro (Hermes+9router)   expires 2026-11-21
+```
+
+Renewal:
+
+```sh
+h9bd lic extend lic_xxxxxxxxxxxx -days 30
+```
+
+Extend counts from `max(now, current expiry)`, so renewing early does not burn the
+days already paid for. Support actions:
+
+```sh
+h9bd lic list
+h9bd lic show lic_xxxxxxxxxxxx      # full record incl. last apply report
+h9bd lic note lic_xxxxxxxxxxxx "ORDER-1234 paid 2026-10-22"
+h9bd lic rebind lic_xxxxxxxxxxxx    # customer changed machine
+h9bd lic revoke lic_xxxxxxxxxxxx    # chargeback / leak
+```
 
 ## Install on a customer machine
 
@@ -46,168 +116,9 @@ make garble-install                                   # pinned v0.12.1
 make release SERVERID=<b64-ed25519-pub> VERSION=0.1.0
 ```
 
+Targets: `linux/amd64`, `linux/arm64`, `windows/amd64`. macOS is not built.
+
 `SERVERID` is mandatory: without it the client is a dev build that warns and does
 not authenticate the server, which would let a relay hand out its own payloads.
 
 ## Server (h9bd) from scratch
-
-### Build
-
-```bash
-git clone <repo> /opt/hermes-9router-bypasser
-cd /opt/hermes-9router-bypasser
-make build          # bin/h9bd, bin/h9b
-sudo install -m755 bin/h9bd /usr/local/bin/h9bd
-```
-
-### Secrets
-
-Three files, all `chmod 600`, all outside the repo:
-
-```bash
-sudo mkdir -p /etc/h9b
-# token signing key — rotate this and every customer token dies
-openssl rand -hex 32 | sudo tee /etc/h9b/token.key >/dev/null
-# server static X25519 identity (advertised in /v1/activate)
-openssl rand -hex 32 | sudo tee /etc/h9b/server.key >/dev/null
-# licence database
-sudo mkdir -p /var/lib/h9b
-```
-
-### TLS
-
-Behind Cloudflare / Caddy / nginx, terminate TLS there and run `h9bd` on
-`127.0.0.1:8080` with `-tls-cert` unset:
-
-```bash
-h9bd serve -addr 127.0.0.1:8080 \
-  -store /var/lib/h9b/store.json \
-  -payloads /opt/hermes-9router-bypasser/payloads \
-  -token-key "$(cat /etc/h9b/token.key)"
-```
-
-Direct TLS with a self-signed cert (works, pin handles trust):
-
-```bash
-h9bd cert new -host h9b.apizen.my.id -out /etc/h9b/tls
-# prints the SPKI pin — put it in the client build:
-#   make release PIN=<hex>
-```
-
-### systemd
-
-```ini
-# /etc/systemd/system/h9bd.service
-[Unit]
-Description=h9b licence and payload server
-After=network-online.target
-
-[Service]
-Type=simple
-User=h9b
-Group=h9b
-EnvironmentFile=/etc/h9b/env
-ExecStart=/usr/local/bin/h9bd serve \
-  -addr 127.0.0.1:8080 \
-  -store /var/lib/h9b/store.json \
-  -payloads /opt/hermes-9router-bypasser/payloads
-Restart=always
-RestartSec=2
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-ReadWritePaths=/var/lib/h9b
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`/etc/h9b/env`:
-
-```
-H9B_TOKEN_KEY=<hex from token.key>
-```
-
-The server accepts `-token-key` or `H9B_TOKEN_KEY`, whichever is set. There is no
-default — it refuses to start without one, on purpose.
-
-### DNS
-
-```
-h9b.apizen.my.id   A      <server IPv4>        proxied=yes (Cloudflare)
-h9b.apizen.my.id   AAAA   <server IPv6>        proxied=yes
-```
-
-Client pins the certificate SPKI, so a Cloudflare proxy is fine — the pin follows
-the origin cert, not the edge. If you later switch to Cloudflare's universal cert,
-rebuild the client with the new pin, or ship both pins and accept either.
-
-### Reload payloads without downtime
-
-```bash
-sudo kill -HUP $(pidof h9bd)
-```
-
-Recipes are re-read from `-payloads`; the licence store is untouched. This is how
-a 9router version bump reaches customers in one command.
-
-## Client (h9b)
-
-### Release build
-
-```bash
-make release PIN=<spki-hex> VERSION=0.1.0
-# dist/h9b-linux-amd64, h9b-linux-arm64, h9b-windows-amd64.exe, h9b-darwin-*
-```
-
-Requires `garble` (`go install mvdan.cc/garble@latest`). Without it `make build`
-still works — you just get a non-obfuscated binary, which is fine for your own
-machines and wrong for customers.
-
-### Customer install
-
-```bash
-curl -fsSL https://h9b.apizen.my.id/i | sh
-h9b activate H9B-XXXXX-XXXXX-XXXXX-XXX
-h9b apply
-```
-
-The installer verifies the release SHA-256 before moving anything into place.
-
-### Auto re-apply after `hermes update`
-
-Linux (systemd user unit):
-
-```bash
-systemctl --user enable --now h9b-apply.timer
-```
-
-Windows (scheduled task, runs as the logged-in user):
-
-```powershell
-schtasks /create /tn h9b-apply /sc hourly /tr "%LOCALAPPDATA%\h9b\h9b.exe apply"
-```
-
-9router recipes need root (they write into `/usr/lib/node_modules`). Run those
-with `sudo h9b apply --only r9-*`, or add a sudoers rule limited to `h9b`.
-
-## Verification checklist before taking money
-
-```bash
-# 1. server answers
-curl -s https://h9b.apizen.my.id/healthz
-
-# 2. a key activates exactly once
-h9b activate <cdk>
-h9b activate <cdk>          # must fail: already bound
-
-# 3. apply is idempotent
-h9b apply && h9b apply      # second run: 0 applied, N already
-
-# 4. rollback restores stock
-h9b rollback && h9b apply
-
-# 5. revoked key is rejected
-h9bd cdk revoke <cdk> && h9b apply   # must fail with 403
-```

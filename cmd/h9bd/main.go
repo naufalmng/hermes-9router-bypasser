@@ -44,6 +44,7 @@ import (
 	"github.com/apizen/h9b/internal/proto"
 	"github.com/apizen/h9b/internal/recipe"
 	"github.com/apizen/h9b/internal/store"
+	"github.com/apizen/h9b/internal/tier"
 	"github.com/apizen/h9b/internal/token"
 )
 
@@ -84,9 +85,16 @@ func usage() {
 
   h9bd serve    -addr :8443 -store /var/lib/h9b/store.json -payloads ./payloads \
                 -tls-cert cert.pem -tls-key key.pem -token-key <hex>
-  h9bd cdk new  -n 10 -tier pro -days 30 -note "batch A"
+  h9bd cdk new  -n 1 -tier basic-hermes -days 30 -note "ORDER-1234"
+                # tiers: basic-hermes | basic-router9 | pro
   h9bd cdk list [-json]
   h9bd cdk revoke -id lic_xxx | -cdk H9B-...
+  h9bd lic list
+  h9bd lic show   <id|mask>                 # full record + last apply report
+  h9bd lic extend <id|mask> -days 30        # renewal, manual
+  h9bd lic note   <id|mask> "ORDER-1234"
+  h9bd lic rebind <id>                      # customer changed machine
+  h9bd lic revoke <id>
   h9bd payload list -dir ./payloads
   h9bd payload check -dir ./payloads        # validate every recipe parses
   h9bd cert new -host h9b.apizen.my.id -out ./certs   # self-signed + SPKI pin
@@ -376,8 +384,13 @@ func (s *server) handlePayload(w http.ResponseWriter, r *http.Request) {
 	// Tier/platform filtering happens server-side: the client never receives a
 	// recipe it is not entitled to, so a memory dump shows only what was bought.
 	filtered := &recipe.Bundle{ID: bundle.ID, Version: bundle.Version}
+	withheld := 0
 	for _, rec := range bundle.Recipes {
 		if len(req.Targets) > 0 && !containsStr(req.Targets, rec.ID) {
+			continue
+		}
+		if !tier.Allows(lic.Tier, rec.ID) {
+			withheld++
 			continue
 		}
 		filtered.Recipes = append(filtered.Recipes, rec)
@@ -401,8 +414,8 @@ func (s *server) handlePayload(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, rec.ID)
 	}
 	_ = s.st.Touch(lic.ID, filtered.ID, nil)
-	log.Printf("payload served lic=%s bundle=%s v%d recipes=%d bytes=%d",
-		lic.ID, filtered.ID, filtered.Version, len(ids), len(ct))
+	log.Printf("payload served lic=%s tier=%s bundle=%s v%d recipes=%d withheld=%d bytes=%d",
+		lic.ID, lic.Tier, filtered.ID, filtered.Version, len(ids), withheld, len(ct))
 
 	serverEphB64 := base64.StdEncoding.EncodeToString(eph.PublicKey().Bytes())
 	nonceB64 := base64.StdEncoding.EncodeToString(nonce)
@@ -454,6 +467,42 @@ func (s *server) handleReport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+// reorderFlags puts flags before positionals.
+//
+// Go's flag package stops parsing at the first non-flag token, so
+// `h9bd lic extend lic_xxx -days 30` silently ignored `-days` and `-store` and
+// opened the default store — which, on a fresh cwd, is an empty one. The licence
+// then "does not exist". Operators type the id first, so accept both orders.
+//
+// The arity of each flag is read from the FlagSet, so `-days 30` and
+// `-days=30` both work and boolean flags never swallow the next token.
+func reorderFlags(fs *flag.FlagSet, args []string) []string {
+	var flags, pos []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if len(a) < 2 || a[0] != '-' {
+			pos = append(pos, a)
+			continue
+		}
+		flags = append(flags, a)
+		if strings.Contains(a, "=") {
+			continue
+		}
+		name := strings.TrimLeft(a, "-")
+		f := fs.Lookup(name)
+		if f != nil {
+			if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && bf.IsBoolFlag() {
+				continue
+			}
+		}
+		if i+1 < len(args) {
+			flags = append(flags, args[i+1])
+			i++
+		}
+	}
+	return append(flags, pos...)
+}
+
 // ---------------------------------------------------------------- cdk
 
 func cmdCDK(args []string) error {
@@ -465,26 +514,30 @@ func cmdCDK(args []string) error {
 	switch args[0] {
 	case "new":
 		n := fs.Int("n", 1, "how many keys")
-		tier := fs.String("tier", "pro", "tier label")
+		tierFlag := fs.String("tier", tier.Pro, "basic-hermes | basic-router9 | pro")
 		days := fs.Int("days", 30, "validity in days")
-		note := fs.String("note", "", "internal note")
-		_ = fs.Parse(args[1:])
+		note := fs.String("note", "", "internal note (order ref, buyer, etc.)")
+		_ = fs.Parse(reorderFlags(fs, args[1:]))
+		t, err := tier.Normalize(*tierFlag)
+		if err != nil {
+			return err
+		}
 		st, err := store.Open(*storePath)
 		if err != nil {
 			return err
 		}
 		for i := 0; i < *n; i++ {
-			key, lic, err := st.Issue(*tier, *days, *note)
+			key, lic, err := st.Issue(t, *days, *note)
 			if err != nil {
 				return err
 			}
-			fmt.Printf("%s\t%s\t%s\texpires %s\n", key, lic.ID, lic.Tier,
-				time.Unix(lic.ExpiresAt, 0).Format("2006-01-02"))
+			fmt.Printf("%s	%s	%s	%s	expires %s\n", key, lic.ID, lic.Tier,
+				tier.Label(lic.Tier), time.Unix(lic.ExpiresAt, 0).Format("2006-01-02"))
 		}
 		return nil
 	case "list":
 		asJSON := fs.Bool("json", false, "json output")
-		_ = fs.Parse(args[1:])
+		_ = fs.Parse(reorderFlags(fs, args[1:]))
 		st, err := store.Open(*storePath)
 		if err != nil {
 			return err
@@ -510,7 +563,7 @@ func cmdCDK(args []string) error {
 	case "revoke":
 		id := fs.String("id", "", "licence id")
 		key := fs.String("cdk", "", "plaintext key")
-		_ = fs.Parse(args[1:])
+		_ = fs.Parse(reorderFlags(fs, args[1:]))
 		st, err := store.Open(*storePath)
 		if err != nil {
 			return err
@@ -546,7 +599,7 @@ func cmdLic(args []string) error {
 	asJSON := fs.Bool("json", false, "json output")
 	switch args[0] {
 	case "list":
-		_ = fs.Parse(args[1:])
+		_ = fs.Parse(reorderFlags(fs, args[1:]))
 		st, err := store.Open(*storePath)
 		if err != nil {
 			return err
@@ -574,7 +627,7 @@ func cmdLic(args []string) error {
 		}
 		return nil
 	case "show":
-		_ = fs.Parse(args[1:])
+		_ = fs.Parse(reorderFlags(fs, args[1:]))
 		if fs.NArg() < 1 {
 			return fmt.Errorf("lic show: need licence id or mask")
 		}
@@ -590,7 +643,7 @@ func cmdLic(args []string) error {
 		fmt.Println(string(b))
 		return nil
 	case "rebind":
-		_ = fs.Parse(args[1:])
+		_ = fs.Parse(reorderFlags(fs, args[1:]))
 		if fs.NArg() < 1 {
 			return fmt.Errorf("lic rebind: need licence id")
 		}
@@ -603,6 +656,52 @@ func cmdLic(args []string) error {
 		}
 		fmt.Println("rebound", fs.Arg(0), "— customer must run: h9b activate <same cdk>")
 		return nil
+	case "extend":
+		days := fs.Int("days", 30, "days to add (from max(now, current expiry))")
+		_ = fs.Parse(reorderFlags(fs, args[1:]))
+		if fs.NArg() < 1 {
+			return fmt.Errorf("lic extend: need licence id or mask")
+		}
+		st, err := store.Open(*storePath)
+		if err != nil {
+			return err
+		}
+		hits := st.FindMask(fs.Arg(0))
+		if len(hits) == 0 {
+			return fmt.Errorf("no licence matching %q", fs.Arg(0))
+		}
+		if len(hits) > 1 {
+			return fmt.Errorf("%q matches %d licences — use the exact id", fs.Arg(0), len(hits))
+		}
+		exp, err := st.Extend(hits[0].ID, *days)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("extended %s  +%dd  -> expires %s\n", hits[0].ID, *days,
+			time.Unix(exp, 0).Format("2006-01-02"))
+		return nil
+	case "note":
+		_ = fs.Parse(reorderFlags(fs, args[1:]))
+		if fs.NArg() < 2 {
+			return fmt.Errorf("lic note: need licence id and text")
+		}
+		st, err := store.Open(*storePath)
+		if err != nil {
+			return err
+		}
+		hits := st.FindMask(fs.Arg(0))
+		if len(hits) == 0 {
+			return fmt.Errorf("no licence matching %q", fs.Arg(0))
+		}
+		if len(hits) > 1 {
+			return fmt.Errorf("%q matches %d licences — use the exact id", fs.Arg(0), len(hits))
+		}
+		text := strings.Join([]string(fs.Args()[1:]), " ")
+		if err := st.SetNote(hits[0].ID, text); err != nil {
+			return err
+		}
+		fmt.Printf("note set on %s: %s\n", hits[0].ID, text)
+		return nil
 	}
 	return fmt.Errorf("lic: unknown subcommand %q", args[0])
 }
@@ -614,7 +713,7 @@ func cmdPayload(args []string) error {
 	}
 	fs := flag.NewFlagSet("payload", flag.ExitOnError)
 	dir := fs.String("dir", "./payloads", "recipe dir")
-	_ = fs.Parse(args[1:])
+	_ = fs.Parse(reorderFlags(fs, args[1:]))
 	entries, err := os.ReadDir(*dir)
 	if err != nil {
 		return err
@@ -657,7 +756,7 @@ func cmdCert(args []string) error {
 	host := fs.String("host", "h9b.apizen.my.id", "hostname")
 	out := fs.String("out", "./certs", "output dir")
 	days := fs.Int("days", 365, "validity")
-	_ = fs.Parse(args[1:])
+	_ = fs.Parse(reorderFlags(fs, args[1:]))
 
 	if err := os.MkdirAll(*out, 0o700); err != nil {
 		return err

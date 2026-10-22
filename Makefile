@@ -17,7 +17,10 @@ garble-install:
 
 BIN := bin
 DIST := dist
-TARGETS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
+# Windows and Linux only. macOS is not sold: the 9router chunks live in a
+# Homebrew prefix that differs per machine, and shipping a target we cannot test
+# on is how a customer ends up with a silent no-op.
+TARGETS := linux/amd64 linux/arm64 windows/amd64
 
 .PHONY: all build test vet fmt payload check release clean install-cli garble-install
 
@@ -64,6 +67,7 @@ release:
 	  echo "  (a build without it warns at runtime and does NOT authenticate the server)"; \
 	  exit 1; fi
 	@mkdir -p $(DIST)
+	@rm -f $(DIST)/*
 	@for t in $(TARGETS); do \
 	  os=$${t%/*}; arch=$${t#*/}; ext=""; \
 	  [ "$$os" = "windows" ] && ext=".exe"; \

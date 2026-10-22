@@ -76,8 +76,6 @@ func main() {
 		err = cmdActivate(os.Args[2:])
 	case "apply":
 		err = cmdApply(os.Args[2:])
-	case "watch":
-		err = cmdWatch(os.Args[2:])
 	case "status":
 		err = cmdStatus(os.Args[2:])
 	case "doctor":
@@ -103,8 +101,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `h9b — runtime patch client
 
   h9b activate H9B-XXXXX-XXXXX-XXXXX-XXX [--server URL]
-  h9b apply [--dry-run] [--only recipe-id] [--verbose]
-  h9b watch [--interval 60] [--interval 60]
+  h9b apply [--dry-run] [--only recipe-id] [--verbose] [--no-verify]
   h9b status
   h9b doctor
   h9b rollback [--all] [--dry-run]
@@ -261,6 +258,7 @@ func cmdApply(args []string) error {
 	verbose := fs.Bool("verbose", false, "per-op detail")
 	insecure := fs.Bool("insecure", false, "skip certificate verification")
 	server := fs.String("server", "", "override server URL")
+	noVerify := fs.Bool("no-verify", false, "skip the post-apply verification pass")
 	_ = fs.Parse(args)
 
 	cfg, err := loadConfig()
@@ -283,16 +281,21 @@ func cmdApply(args []string) error {
 	}
 	results := recipe.Apply(bundle, opts)
 
-	applied, already, failed := 0, 0, 0
+	applied, already, skipped, failed := 0, 0, 0, 0
 	for _, r := range results {
 		switch r.Status {
 		case "applied":
 			applied++
 			fmt.Printf("  + %-30s %s\n", r.ID, r.Detail)
-		case "already", "skipped":
+		case "already":
 			already++
 			if *verbose {
 				fmt.Printf("  = %-30s %s\n", r.ID, r.Detail)
+			}
+		case "skipped":
+			skipped++
+			if *verbose {
+				fmt.Printf("  - %-30s %s\n", r.ID, r.Detail)
 			}
 		case "dry_run":
 			applied++
@@ -302,8 +305,8 @@ func cmdApply(args []string) error {
 			fmt.Printf("  ! %-30s %s %v\n", r.ID, r.Status, r.Missed)
 		}
 	}
-	fmt.Printf("\nbundle %s v%d — %d applied, %d already, %d failed\n",
-		bundle.ID, bundle.Version, applied, already, failed)
+	fmt.Printf("\nbundle %s v%d — %d applied, %d already, %d skipped, %d failed\n",
+		bundle.ID, bundle.Version, applied, already, skipped, failed)
 
 	// Report back so anchor drift shows up on the server, not in a support ticket.
 	if !*dry {
@@ -314,6 +317,37 @@ func cmdApply(args []string) error {
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d recipe(s) did not apply", failed)
+	}
+
+	// The customer's actual question is "is this machine done now?", so prove it
+	// instead of trusting the exit code of the writes.
+	if *dry || *noVerify {
+		return nil
+	}
+	fmt.Printf("\nverifikasi\n")
+	checks := recipe.VerifyAll(bundle, results, opts)
+	for _, c := range checks {
+		mark := "ok  "
+		if !c.OK {
+			mark = "FAIL"
+		}
+		detail := ""
+		switch {
+		case !c.Marker && !c.Syntax:
+			detail = "marker hilang + " + c.Detail
+		case !c.Marker:
+			detail = "marker tidak ada di file"
+		case !c.Syntax:
+			detail = c.SyntaxKind + ": " + c.Detail
+		case c.SyntaxKind == "skipped":
+			detail = c.Detail
+		}
+		fmt.Printf("  %s %-30s %s\n", mark, c.ID, strings.TrimSpace(detail))
+	}
+	done, line := recipe.Summary(checks)
+	fmt.Printf("\n%s\n", line)
+	if !done {
+		return fmt.Errorf("verification failed")
 	}
 	return nil
 }
@@ -402,23 +436,6 @@ func reportResults(cfg *config, insecure bool, bundleID string, results []recipe
 	}
 	_ = post(newClient(insecure), strings.TrimRight(cfg.Server, "/")+"/v1/report", cfg.FP,
 		proto.ReportRequest{Token: cfg.Token, FP: cfg.FP, BundleID: bundleID, Results: pr}, &struct{}{})
-}
-
-func cmdWatch(args []string) error {
-	fs := flag.NewFlagSet("watch", flag.ExitOnError)
-	interval := fs.Int("interval", 60, "seconds between checks")
-	insecure := fs.Bool("insecure", false, "skip certificate verification")
-	_ = fs.Parse(args)
-	if *interval < 10 {
-		return errors.New("watch: interval must be >= 10s")
-	}
-	fmt.Printf("watching — re-applying every %ds (ctrl-c to stop)\n", *interval)
-	for {
-		if err := cmdApply([]string{"--insecure=" + boolStr(*insecure)}); err != nil {
-			fmt.Fprintf(os.Stderr, "%s  %v\n", time.Now().Format("15:04:05"), err)
-		}
-		time.Sleep(time.Duration(*interval) * time.Second)
-	}
 }
 
 func cmdStatus(args []string) error {
@@ -579,13 +596,6 @@ func cmdRollback(args []string) error {
 		return fmt.Errorf("%d file(s) could not be restored", failed)
 	}
 	return nil
-}
-
-func boolStr(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
 }
 
 // rotateLeadingPositional lets `h9b activate KEY --server URL` work.

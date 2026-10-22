@@ -55,6 +55,68 @@ have been a dev build that accepts payloads from any relay. `SERVERID` is now
 required by the target and by CI (`H9B_SERVERID` secret); building without it
 fails loudly instead of shipping an unauthenticated client.
 
+## 2026-10-22 — tiers, one-shot verification, Windows+Linux only
+
+Product decisions from the owner, all four implemented:
+
+**1. Targets are Windows and Linux only.** `darwin/amd64` and `darwin/arm64` are
+gone from `TARGETS`. The 9router chunks live in a Homebrew prefix that differs per
+machine, and a target nobody tested is how a customer ends up with a silent no-op.
+
+**2. Three tiers, enforced on the server.**
+
+```
+basic-hermes    hg-* only     proven: 5 hg, 0 r9
+basic-router9   r9-* only     proven: 0 hg, 5 r9
+pro             both          proven: 5 hg, 5 r9
+```
+
+`internal/tier` maps recipe prefix to product, and `handlePayload` filters before
+sealing. A Basic customer who dumps the client's memory finds only the recipes
+they paid for. Bare `basic` is refused — it names two products, and guessing
+sells the wrong half. Unknown tier strings fail closed.
+
+**3. Selling is manual by CLI.** `cdk new -tier … -note "ORDER-1234"`, then
+`lic extend -days N` on renewal. Extend counts from `max(now, current expiry)` so
+renewing early does not burn paid days. Also added `lic note` for order refs.
+
+**4. No timer, no daemon on the customer machine.** `h9b watch` and the systemd
+timer are deleted. One run per machine, and the run ends with a verification pass
+that answers the only question the customer has:
+
+```
+verifikasi
+  ok   hg-threat-patterns
+  ...
+SELESAI — 10/10 terverifikasi      exit 0
+BELUM SELESAI — 1/10 gagal: hg-threat-patterns   exit 1
+```
+
+Each target is proven twice: **marker** (replacement text present in the file) and
+**syntax** (file still parses with its own interpreter — `python -c compile` using
+the venv next to the install, `node --check` for `.js`). Nothing is written by the
+check: the Python path compiles bytes in memory, so no `__pycache__` appears in
+the customer's tree.
+
+Proven on this box: apply → `SELESAI 10/10`; corrupt a file → `BELUM SELESAI 1/10`
+exit 1; `rollback` → file parses again.
+
+### Bugs this round
+
+5. **`-days` after a positional was silently dropped.** `h9bd lic extend lic_xxx
+   -days 30 -store …` ignored both flags, opened the default store (empty in a
+   fresh cwd) and reported "no licence matching". Added `reorderFlags`, which
+   reads each flag's arity from the FlagSet so both orders work.
+6. **`findPython` only looked for `python.exe`.** On Linux the venv check then
+   fell through to the system python — a different interpreter than the one that
+   imports the file. Now platform-aware (`python3`/`python` vs `*.exe`).
+7. **skipped counted as already.** A customer without 9router saw "10 already"
+   when 5 were skipped. Now the summary separates them:
+   `0 applied, 5 already, 5 skipped, 0 failed`.
+
+Windows re-proven after the change: `basic-hermes` key → 5 recipes, `SELESAI 5/5`;
+`pro` key → 10 recipes, 5 skipped (no 9router), `SELESAI 5/5`, exit 0.
+
 ## 2026-10-22 — deployed and proven through the public endpoint
 
 ```

@@ -288,6 +288,42 @@ func (s *Store) Rebind(id string) error {
 	return s.saveLocked()
 }
 
+// Extend pushes the expiry out by days.
+//
+// Renewal is manual for now (the operator confirms the payment, then runs this),
+// so it must be safe to repeat: extending from max(now, current expiry) means a
+// customer who renews early does not lose the days they already paid for.
+func (s *Store) Extend(id string, days int) (int64, error) {
+	if days <= 0 {
+		return 0, fmt.Errorf("extend: days must be positive")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshLocked()
+	l, ok := s.Licenses[id]
+	if !ok {
+		return 0, ErrUnknownCDK
+	}
+	base := l.ExpiresAt
+	if now := time.Now().Unix(); now > base {
+		base = now
+	}
+	l.ExpiresAt = base + int64(days)*86400
+	return l.ExpiresAt, s.saveLocked()
+}
+
+// SetNote records free-form operator context (order reference, buyer handle).
+func (s *Store) SetNote(id, note string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l, ok := s.Licenses[id]
+	if !ok {
+		return ErrUnknownCDK
+	}
+	l.Note = note
+	return s.saveLocked()
+}
+
 // List returns licences newest-first.
 func (s *Store) List() []License {
 	s.mu.Lock()
