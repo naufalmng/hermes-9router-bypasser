@@ -128,7 +128,10 @@ func cmdServe(args []string) error {
 	tokenKeyFile := fs.String("token-key-file", "", "file holding the HMAC key as hex (preferred over -token-key, keeps the key out of ps)")
 	idKeyPath := fs.String("id-key", "./data/server.ed25519", "Ed25519 identity key (created if absent)")
 	minGap := fs.Duration("min-gap", 3*time.Second, "minimum delay between payload fetches per machine")
-	_ = fs.Parse(args)
+	installURL := fs.String("install-url",
+		"https://github.com/naufalmng/hermes-9router-bypasser/releases/latest/download/install.sh",
+		"target of the short /i install URL")
+	_ = fs.Parse(reorderFlags(fs, args))
 
 	st, err := store.Open(*storePath)
 	if err != nil {
@@ -171,6 +174,12 @@ func cmdServe(args []string) error {
 	mux.HandleFunc("/v1/activate", s.handleActivate)
 	mux.HandleFunc("/v1/payload", s.withGap(*minGap, s.handlePayload))
 	mux.HandleFunc("/v1/report", s.handleReport)
+	// Short install URL: `curl -fsSL https://<host>/i | sh`. A redirect rather
+	// than serving the script means the installer lives in one place (the repo)
+	// and cannot drift from what the release actually shipped.
+	mux.HandleFunc("/i", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, *installURL, http.StatusFound)
+	})
 
 	srv := &http.Server{
 		Addr:              *addr,
