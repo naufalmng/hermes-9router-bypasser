@@ -86,13 +86,40 @@ h9bd lic revoke lic_xxxxxxxxxxxx    # chargeback / leak
 ## Install on a customer machine
 
 ```sh
-curl -fsSL https://github.com/naufalmng/hermes-9router-bypasser/releases/latest/download/install.sh | sh
+curl -fsSL https://h9b.apizen.my.id/i | sh
 h9b activate H9B-XXXXX-XXXXX-XXXXX-XXX
 h9b apply --dry-run --verbose     # look before you write
 h9b apply
 ```
 
+No-install variant — the binary is fetched to a temp dir, run, and deleted. Only
+`~/.h9b/config.json` (the licence) survives, so the two calls can be separated:
+
+```sh
+curl -fsSL https://h9b.apizen.my.id/i | sh -s -- activate H9B-XXXXX-XXXXX-XXXXX-XXX
+curl -fsSL https://h9b.apizen.my.id/i | sh -s -- apply
+```
+
 The installer verifies `SHA256SUMS` and refuses to install a mismatched binary.
+
+### Binaries are served by us, not GitHub
+
+`h9bd -assets /opt/h9b/assets` serves the release files at `/dl/<name>` and serves
+`install.sh` directly at `/i` (no redirect). The installer tries the mirror first
+and falls back to GitHub releases only if that fails.
+
+This is not cosmetic. GitHub's asset CDN repeatedly established a connection and
+then delivered nothing from an Indonesian consumer link — the one-liner sat with
+no output at all, and `--max-time` alone took minutes to give up. The same 9 MB
+file comes off our tunnel in ~3 s. Populate the directory after every release:
+
+```sh
+cp dist/h9b-* dist/h9bd-* dist/SHA256SUMS dist/install.sh /opt/h9b/assets/
+```
+
+Only `h9b-*`, `h9bd-*`, `SHA256SUMS` and `install.sh` are exposed; the handler
+takes `path.Base` and then checks that whitelist, so `/dl/../../etc/passwd` is a
+404 rather than a file read.
 
 ### Windows
 

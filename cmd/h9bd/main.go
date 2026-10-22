@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -133,7 +134,9 @@ func cmdServe(args []string) error {
 	minGap := fs.Duration("min-gap", 3*time.Second, "minimum delay between payload fetches per machine")
 	installURL := fs.String("install-url",
 		"https://github.com/naufalmng/hermes-9router-bypasser/releases/latest/download/install.sh",
-		"target of the short /i install URL")
+		"fallback target of the short /i install URL when -assets has no install.sh")
+	assetsDir := fs.String("assets", "",
+		"directory of release binaries to serve at /dl (empty = disabled, /i redirects to -install-url)")
 	_ = fs.Parse(reorderFlags(fs, args))
 
 	st, err := store.Open(*storePath)
@@ -177,10 +180,25 @@ func cmdServe(args []string) error {
 	mux.HandleFunc("/v1/activate", s.handleActivate)
 	mux.HandleFunc("/v1/payload", s.withGap(*minGap, s.handlePayload))
 	mux.HandleFunc("/v1/report", s.handleReport)
-	// Short install URL: `curl -fsSL https://<host>/i | sh`. A redirect rather
-	// than serving the script means the installer lives in one place (the repo)
-	// and cannot drift from what the release actually shipped.
+	// Short install URL: `curl -fsSL https://<host>/i | sh`.
+	//
+	// Preferred path is serving the installer ourselves. The redirect to GitHub
+	// releases is the fallback, and it is worth avoiding: on Indonesian consumer
+	// links GitHub's asset CDN regularly establishes a connection and then
+	// delivers nothing, which turns the one-liner into a stall. The same box
+	// pulled the same asset from our own tunnel in under a second.
+	if *assetsDir != "" {
+		mux.HandleFunc("/dl/", serveAsset(*assetsDir))
+	}
 	mux.HandleFunc("/i", func(w http.ResponseWriter, r *http.Request) {
+		if *assetsDir != "" {
+			p := filepath.Join(*assetsDir, "install.sh")
+			if st, err := os.Stat(p); err == nil && !st.IsDir() {
+				w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+				http.ServeFile(w, r, p)
+				return
+			}
+		}
 		http.Redirect(w, r, *installURL, http.StatusFound)
 	})
 
@@ -836,6 +854,35 @@ func cmdCert(args []string) error {
 }
 
 // ---------------------------------------------------------------- helpers
+
+// serveAsset exposes release binaries for the installer to download from us
+// instead of GitHub. The name is taken with path.Base and then checked against a
+// whitelist, so a crafted /dl/../../etc/passwd cannot escape the directory even
+// though the mux would happily match it.
+func serveAsset(dir string) http.HandlerFunc {
+	allowed := func(name string) bool {
+		switch {
+		case name == "SHA256SUMS", name == "install.sh":
+			return true
+		case strings.HasPrefix(name, "h9b-"), strings.HasPrefix(name, "h9bd-"):
+			return true
+		}
+		return false
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := path.Base(r.URL.Path)
+		if !allowed(name) {
+			http.NotFound(w, r)
+			return
+		}
+		p := filepath.Join(dir, name)
+		if st, err := os.Stat(p); err != nil || st.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, p)
+	}
+}
 
 func logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -14,20 +14,26 @@
 # the key survives; only the executable is thrown away.
 #
 # Env overrides:
-#   H9B_BASE   release base URL (default https://github.com/<org>/<repo>/releases/download)
-#   H9B_DIR    install dir (default $HOME/.local/bin on unix, %LOCALAPPDATA%\h9b on windows)
+#   H9B_MIRROR  primary download base (default https://h9b.apizen.my.id/dl)
+#   H9B_BASE    release base URL used as fallback (default https://github.com/<org>/<repo>/releases)
+#   H9B_DIR     install dir (default $HOME/.local/bin on unix, %LOCALAPPDATA%\h9b on windows)
 set -eu
 
 VERSION="${H9B_VERSION:-latest}"
 REPO="${H9B_REPO:-naufalmng/hermes-9router-bypasser}"
-BASE="${H9B_BASE:-https://github.com/$REPO/releases}"
+# Our own server is the primary source. GitHub's asset CDN is unreliable on
+# Indonesian consumer links — it establishes a connection and then delivers
+# nothing — so releases are the fallback, not the default.
+MIRROR="${H9B_MIRROR:-https://h9b.apizen.my.id/dl}"
+RELEASES="${H9B_BASE:-https://github.com/$REPO/releases}"
 MODE=install
 RUNARGS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --version) VERSION="$2"; shift 2 ;;
-    --base)    BASE="$2"; shift 2 ;;
+    --base)    RELEASES="$2"; shift 2 ;;
+    --mirror)  MIRROR="$2"; shift 2 ;;
     --ephemeral|--no-install|--tmp) MODE=ephemeral; shift ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     --) shift; RUNARGS="$*"; MODE=ephemeral; break ;;
@@ -58,12 +64,14 @@ ext=""
 [ "$os" = "windows" ] && ext=".exe"
 asset="h9b-${os}-${arch}${ext}"
 
+mirror_url="$MIRROR/$asset"
+mirror_sums="$MIRROR/SHA256SUMS"
 if [ "$VERSION" = "latest" ]; then
-  url="$BASE/latest/download/$asset"
-  sums_url="$BASE/latest/download/SHA256SUMS"
+  rel_url="$RELEASES/latest/download/$asset"
+  rel_sums="$RELEASES/latest/download/SHA256SUMS"
 else
-  url="$BASE/download/v$VERSION/$asset"
-  sums_url="$BASE/download/v$VERSION/SHA256SUMS"
+  rel_url="$RELEASES/download/v$VERSION/$asset"
+  rel_sums="$RELEASES/download/v$VERSION/SHA256SUMS"
 fi
 
 tmp=$(mktemp -d)
@@ -86,8 +94,20 @@ fetch() { # fetch <url> <out>
   fi
 }
 
-fetch "$url" "$tmp/h9b" || { echo "download failed: $url" >&2; exit 1; }
-fetch "$sums_url" "$tmp/SHA256SUMS" 2>/dev/null || true
+# Track where the binary came from: the checksum must come from the same source,
+# or a version skew between mirror and release would look like a tampered file.
+used_mirror=1
+fetch "$mirror_url" "$tmp/h9b" || {
+  echo "  mirror failed, trying releases" >&2
+  used_mirror=0
+  fetch "$rel_url" "$tmp/h9b" || { echo "download failed: $mirror_url and $rel_url" >&2; exit 1; }
+}
+if [ "$used_mirror" = "1" ]; then
+  fetch "$mirror_sums" "$tmp/SHA256SUMS" 2>/dev/null || true
+else
+  fetch "$rel_sums" "$tmp/SHA256SUMS" 2>/dev/null ||
+    fetch "$mirror_sums" "$tmp/SHA256SUMS" 2>/dev/null || true
+fi
 
 if [ -s "$tmp/SHA256SUMS" ]; then
   want=$(grep " $asset\$" "$tmp/SHA256SUMS" | awk '{print $1}')

@@ -55,6 +55,39 @@ have been a dev build that accepts payloads from any relay. `SERVERID` is now
 required by the target and by CI (`H9B_SERVERID` secret); building without it
 fails loudly instead of shipping an unauthenticated client.
 
+## 2026-10-22 — no-install mode, self-hosted binaries
+
+Two problems with the customer path, both found by actually running the public
+one-liner instead of assuming it worked.
+
+16. **The installer had no way to run without installing.** It always dropped a
+    binary in `~/.local/bin`. Now any bare argument implies ephemeral mode: fetch
+    to `$tmp`, run with those args, delete on exit. `~/.h9b/config.json` still
+    persists, so `activate` and `apply` can be separate invocations with no
+    binary on disk. Exit code is propagated, so `apply` returning BELUM SELESAI
+    is visible to a script.
+17. **GitHub's asset CDN stalled, and `--max-time` was the wrong tool.** The
+    connection established and then delivered nothing — 9 MB at 0 B/s. Added
+    `--speed-limit 1024 --speed-time 20` so a stall aborts in 20 s instead of
+    minutes, and moved the primary download to our own server:
+    `h9bd -assets /opt/h9b/assets` serves `/dl/<name>` and serves `install.sh`
+    directly at `/i` with no redirect. GitHub releases are now the fallback.
+
+Measured after the change, from this box:
+
+| path | before | after |
+|---|---|---|
+| `/i` | 302 → GitHub | 200, 0.68 s, `text/x-shellscript` |
+| 9 MB binary | stall, never finished | 2.9 s @ 3.1 MB/s |
+| full one-liner + activate | hung | 2.5 s |
+
+Path traversal on `/dl` returns 404 for `/dl/../../etc/passwd`,
+`/dl/..%2f..%2fetc%2fpasswd` and `/dl/store.json`; only `h9b-*`, `h9bd-*`,
+`SHA256SUMS` and `install.sh` are served.
+
+Fallback verified by pointing `H9B_MIRROR` at a dead port: it prints
+`mirror failed, trying releases` and completes from GitHub.
+
 ## 2026-10-22 — hardware lock: 2-of-3 quorum over machine, MAC, disk
 
 A single-value binding was wrong in both directions, so it is now three
