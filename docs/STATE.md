@@ -123,6 +123,25 @@ REFUSED 403 licence bound to another machine (0/3 hardware components matched, 2
     requires `PEPPER` and refuses to build without it; the value lives in
     `/opt/h9b-secrets/pepper.txt` and must never rotate without a mass rebind.
     Because this changed every hash, all existing licences were rebound.
+12. **`-X` left the pepper in plaintext.** Stamping it with `-X` writes the raw
+    bytes into the symbol table, so `strings h9b | grep <pepper>` recovered it in
+    one command and garble could not help. Release now generates
+    `internal/fingerprint/pepper_gen.go` (build tag `pepperbuild`) with the value
+    as a string *literal*, which garble's `-literals` pass stores encrypted.
+    Verified: `grep -c <pepper> dist/h9b-*` → 0 on both binaries, and the
+    composite fingerprint is unchanged (`437d592e…`), so no customer rebind.
+13. **`lic list` showed the wrong columns.** The hardware column landed in
+    `cdk list` instead (two `case "list"` blocks, one per subcommand), and the
+    state label defaulted to `unbound` for bound licences. Now `lic list` prints
+    `APPLY  HW  BOUND / STATE` with the component count, and `cdk list` stays a
+    simple issued-key view.
+14. **The installer could hang forever.** No `--connect-timeout`/`--max-time`, so
+    a stalled GitHub asset CDN produced a completely silent hang — reproduced
+    live while testing the public one-liner. Now 20 s connect, 300 s total,
+    3 retries.
+15. **`healthz` reported `0.1.0` on a 0.2.0 server.** `serverVersion` was a
+    `const`, which is inlined and cannot be set by `-X`; it is a `var` now and the
+    release stamps it.
 
 Windows after the change reports all three components and still applies cleanly:
 
