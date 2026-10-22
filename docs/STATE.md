@@ -55,6 +55,32 @@ have been a dev build that accepts payloads from any relay. `SERVERID` is now
 required by the target and by CI (`H9B_SERVERID` secret); building without it
 fails loudly instead of shipping an unauthenticated client.
 
+## 2026-10-22 — cleanup
+
+Test debris removed, production untouched and re-verified afterwards.
+
+- Store wiped: 29 test licences → 0. Nothing was ever sold, so nothing was lost.
+  `store.json` is `{"licenses":{},"version":1}` — note it is a **map**, not an
+  array; writing `[]` makes the server refuse to start with
+  `corrupt … cannot unmarshal array into Go struct field Store.licenses`.
+- `bin/` and `data/` removed from the working tree. The operator CLI is now
+  `dist/h9bd-linux-amd64`, the same binary the server runs, so `cdk new` cannot
+  drift from what `serve` expects.
+- `payloads/hermes-guardrail.v1.json` and `payloads/router9-disarm.v1.json` were
+  plaintext recipes with real anchors sitting in the working tree, gitignored but
+  on disk — and stale (router9 hash `63ad6a87…` vs the served `20692849…`). They
+  only exist in `/opt/h9b-secrets/payloads` and `/opt/h9b/payloads` now; the repo
+  keeps `example.recipe.json` only.
+- GitHub release `v0.1.0` deleted (assets were a pre-pepper build that cannot
+  decrypt today's payloads anyway). Tag kept, so it is recoverable.
+- Removed: `/tmp` test homes and binaries, the two `python3 -m http.server` test
+  servers on 18901-18904, the `/root` unit-file backup, and the Windows-side
+  `h9b.exe`, `t.ps1`, `.h9b`.
+
+Re-verified after cleanup, from a fresh home on both platforms: `activated
+lic_… tier=pro`, `SELESAI — 5/5 terverifikasi`, zero temp dirs, no installed
+binary. `dist/` and `/opt/h9b/assets` are byte-identical across all 7 files.
+
 ## 2026-10-22 — public repo is the entry point (correct flow)
 
 The intended flow is: customer curls the **public repository**, and that script is
