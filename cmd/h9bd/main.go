@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/apizen/h9b/internal/cdk"
+	"github.com/apizen/h9b/internal/identity"
 	"github.com/apizen/h9b/internal/kdf"
 	"github.com/apizen/h9b/internal/proto"
 	"github.com/apizen/h9b/internal/recipe"
@@ -99,6 +100,8 @@ type server struct {
 	st        *store.Store
 	tokenKey  []byte
 	staticPub string
+	id        *identity.Identity
+	idPub     string
 	mu        sync.Mutex
 	lastFetch map[string]time.Time
 	payloadDir string
@@ -114,6 +117,7 @@ func cmdServe(args []string) error {
 	certFile := fs.String("tls-cert", "", "TLS certificate (empty = plain HTTP, dev only)")
 	keyFile := fs.String("tls-key", "", "TLS private key")
 	tokenKeyHex := fs.String("token-key", "", "HMAC key hex (empty = random per boot)")
+	idKeyPath := fs.String("id-key", "./data/server.ed25519", "Ed25519 identity key (created if absent)")
 	minGap := fs.Duration("min-gap", 3*time.Second, "minimum delay between payload fetches per machine")
 	_ = fs.Parse(args)
 
@@ -122,6 +126,17 @@ func cmdServe(args []string) error {
 		return err
 	}
 	s := &server{st: st, lastFetch: map[string]time.Time{}, payloadDir: *payloadDir}
+
+	// Identity key: the client embeds its public half, so this file must survive
+	// restarts and redeploys. Rotating it invalidates every shipped client.
+	id, err := identity.Load(*idKeyPath)
+	if err != nil {
+		return err
+	}
+	s.id = id
+	s.idPub = id.PublicB64()
+	log.Printf("server identity %s (embed in client: -X main.serverID=%s)",
+		*idKeyPath, s.idPub)
 	if *tokenKeyHex != "" {
 		s.tokenKey, err = hex.DecodeString(*tokenKeyHex)
 		if err != nil || len(s.tokenKey) < 32 {
@@ -381,10 +396,21 @@ func (s *server) handlePayload(w http.ResponseWriter, r *http.Request) {
 	log.Printf("payload served lic=%s bundle=%s v%d recipes=%d bytes=%d",
 		lic.ID, filtered.ID, filtered.Version, len(ids), len(ct))
 
+	serverEphB64 := base64.StdEncoding.EncodeToString(eph.PublicKey().Bytes())
+	nonceB64 := base64.StdEncoding.EncodeToString(nonce)
+
+	// Sign the transcript last: every field the client will act on is now fixed.
+	sig := ""
+	if s.id != nil {
+		sig = s.id.Sign(lic.ID, req.EphPub, serverEphB64, req.Nonce)
+	}
+
 	writeJSON(w, 200, proto.PayloadResponse{
-		ServerEphPub: base64.StdEncoding.EncodeToString(eph.PublicKey().Bytes()),
-		Nonce:        base64.StdEncoding.EncodeToString(nonce),
+		ServerEphPub: serverEphB64,
+		Nonce:        nonceB64,
 		CT:           base64.StdEncoding.EncodeToString(ct),
+		ServerID:     s.idPub,
+		Sig:          sig,
 		BundleID:     filtered.ID,
 		Version:      filtered.Version,
 		ExpiresAt:    lic.ExpiresAt,

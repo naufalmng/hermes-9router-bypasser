@@ -59,6 +59,8 @@ type Store struct {
 	Licenses map[string]*License `json:"licenses"`
 	byCDK    map[string]string   `json:"-"`
 	Version  int                 `json:"version"`
+	mtime    time.Time           `json:"-"`
+	size     int64               `json:"-"`
 }
 
 // HashCDK returns the lookup hash for a key.
@@ -84,6 +86,10 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	s.reindex()
+	if st, err := os.Stat(path); err == nil {
+		s.mtime = st.ModTime()
+		s.size = st.Size()
+	}
 	return s, nil
 }
 
@@ -113,7 +119,46 @@ func (s *Store) saveLocked() error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	if err := os.Rename(tmp, s.path); err != nil {
+		return err
+	}
+	if st, err := os.Stat(s.path); err == nil {
+		s.mtime = st.ModTime()
+		s.size = st.Size()
+	}
+	return nil
+}
+
+// refreshLocked reloads the file if another process rewrote it.
+//
+// This exists because the operator workflow is `h9bd cdk new ...` while the
+// server is running: two processes, one file. Without this, a freshly issued key
+// is invisible until the server restarts, which looks exactly like a broken CDK
+// to the customer. Caller must hold mu.
+func (s *Store) refreshLocked() {
+	st, err := os.Stat(s.path)
+	if err != nil {
+		return
+	}
+	if st.ModTime().Equal(s.mtime) && st.Size() == s.size {
+		return
+	}
+	raw, err := os.ReadFile(s.path)
+	if err != nil {
+		return
+	}
+	var fresh Store
+	if err := json.Unmarshal(raw, &fresh); err != nil {
+		return // keep the in-memory copy rather than dropping every licence
+	}
+	s.Licenses = fresh.Licenses
+	if s.Licenses == nil {
+		s.Licenses = map[string]*License{}
+	}
+	s.Version = fresh.Version
+	s.reindex()
+	s.mtime = st.ModTime()
+	s.size = st.Size()
 }
 
 // Issue registers a brand-new key. The plaintext key is returned once, for
@@ -157,6 +202,7 @@ func (s *Store) Lookup(key string) (*License, error) {
 func (s *Store) Get(id string) (*License, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.refreshLocked()
 	l, ok := s.Licenses[id]
 	return l, ok
 }
@@ -168,6 +214,7 @@ func (s *Store) Activate(key, fp, platform string) (*License, error) {
 	h := HashCDK(key)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.refreshLocked()
 	id, ok := s.byCDK[h]
 	if !ok {
 		return nil, ErrUnknownCDK
@@ -245,6 +292,7 @@ func (s *Store) Rebind(id string) error {
 func (s *Store) List() []License {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.refreshLocked()
 	out := make([]License, 0, len(s.Licenses))
 	for _, l := range s.Licenses {
 		out = append(out, *l)

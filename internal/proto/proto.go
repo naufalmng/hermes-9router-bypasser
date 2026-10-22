@@ -40,13 +40,21 @@ type PayloadRequest struct {
 }
 
 // PayloadResponse carries the sealed bundle.
+//
+// The client verifies Sig against the server's long-term Ed25519 identity key
+// BEFORE decrypting. That signature is what makes a TLS-terminating proxy
+// (Cloudflare tunnel, corporate MITM box) harmless: a relay can present its own
+// ephemeral key and seal its own payload, but it cannot sign the transcript
+// without the server's identity key.
 type PayloadResponse struct {
-	ServerEphPub string `json:"server_eph_pub"`
-	Nonce        string `json:"nonce"` // base64 AEAD nonce
-	CT           string `json:"ct"`    // base64 ciphertext
-	BundleID     string `json:"bundle_id"`
-	Version      int    `json:"version"`
-	ExpiresAt    int64  `json:"expires_at"`
+	ServerEphPub string   `json:"server_eph_pub"` // base64 X25519, 32 B
+	Nonce        string   `json:"nonce"`          // base64 AEAD nonce
+	CT           string   `json:"ct"`             // base64 ciphertext
+	ServerID     string   `json:"server_id"`      // base64 Ed25519 pub, 32 B
+	Sig          string   `json:"sig"`            // base64 Ed25519 over transcript
+	BundleID     string   `json:"bundle_id"`
+	Version      int      `json:"version"`
+	ExpiresAt    int64    `json:"expires_at"`
 	RecipeIDs    []string `json:"recipe_ids"`
 }
 

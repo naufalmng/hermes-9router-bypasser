@@ -1,8 +1,9 @@
 SHELL := /bin/bash
 VERSION ?= 0.1.0
 PIN ?=
+SERVERID ?=
 GOFLAGS := -trimpath
-LDFLAGS := -s -w -X main.pin=$(PIN)
+LDFLAGS := -s -w -X main.pin=$(PIN) -X main.serverID=$(SERVERID) -X main.clientVersion=$(VERSION)
 GARBLE := $(shell command -v garble 2>/dev/null || echo $(HOME)/go/bin/garble)
 HOSTARCH := $(shell go env GOARCH)
 

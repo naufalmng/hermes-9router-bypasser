@@ -79,6 +79,7 @@ POST /v1/payload
 { "token": "...", "fp": "...", "eph_pub": "<b64 X25519>", "nonce": "<b64 16B>" }
 
 200 { "server_eph_pub": "<b64>", "nonce": "<b64 12B>", "ct": "<b64 AES-256-GCM>",
+      "server_id": "<b64 Ed25519 pub>", "sig": "<b64 Ed25519>",
       "expires_at": ..., "bundle_id": "bundle-20261022" }
 ```
 
@@ -99,6 +100,38 @@ Properties worth naming:
   the key does not exist until the handshake completes.
 - **Binding.** `salt` includes the licence id and the client nonce, so a response
   cannot be replayed to a different licence or a different request.
+
+### 2b. Why the signature, and not just TLS pinning
+
+Pinning is only as good as the certificate, and the certificate stops being yours
+the moment the server sits behind a tunnel or proxy: Cloudflare, a corporate
+middlebox, a cheap VPS with its own terminator. In that topology an interceptor
+completes the X25519 handshake with **its own** ephemeral key, seals **its own**
+payload, and the client decrypts it happily — pinning never fires, because TLS was
+legitimately terminated upstream.
+
+So the payload channel authenticates itself, independent of TLS:
+
+```
+server holds   Ed25519 identity key (never leaves the box)
+client embeds  the matching public key at build time (-X main.serverID=...)
+
+transcript = "h9b/v1|" + license_id + "|" + client_eph_pub
+                       + "|" + server_eph_pub + "|" + request_nonce
+
+response carries  server_id, sig = Ed25519(transcript)
+client            verifies sig BEFORE deriving the content key
+```
+
+Every field the client is about to act on is inside the transcript: swap the
+licence, the client key, the server key or the nonce and the signature breaks. A
+relay cannot sign, so it can only forward the real response verbatim — a delivery,
+not an attack.
+
+Consequence: **pinning is defence-in-depth, not the load-bearing control**, and
+the product runs behind Cloudflare Tunnel without weakening. The identity key is
+generated once and backed up like a signing key; rotating it invalidates every
+shipped client.
 
 The bundle is decrypted into memory, applied, and dropped. Nothing hits disk
 except the files being patched (which are the customer's own files) and their

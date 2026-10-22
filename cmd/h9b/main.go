@@ -30,6 +30,7 @@ import (
 
 	"github.com/apizen/h9b/internal/cdk"
 	"github.com/apizen/h9b/internal/fingerprint"
+	"github.com/apizen/h9b/internal/identity"
 	"github.com/apizen/h9b/internal/kdf"
 	"github.com/apizen/h9b/internal/proto"
 	"github.com/apizen/h9b/internal/recipe"
@@ -42,6 +43,12 @@ var clientVersion = "0.1.0-dev"
 // pin is the SPKI SHA-256 of the server certificate, injected at build time.
 // Empty means "no pinning" and is only acceptable for local testing.
 var pin = ""
+
+// serverID is the server's Ed25519 public key (base64), compiled in at release.
+//
+// Empty means a dev build: the client warns and proceeds without authenticating
+// the server. Never ship a release with an empty serverID.
+var serverID = ""
 
 // caFile is an extra trust anchor, for deployments that are not yet behind a
 // public CA. Set with --ca or H9B_CA. Pinning still applies on top of it.
@@ -327,6 +334,16 @@ func fetchBundle(cfg *config, insecure bool) (*recipe.Bundle, error) {
 	}, &out); err != nil {
 		return nil, err
 	}
+	// Authenticate the server BEFORE trusting anything it sent.
+	//
+	// TLS pinning stops working the moment the server sits behind a
+	// TLS-terminating proxy, so the real authentication is this signature: the
+	// transcript binds the licence, our ephemeral key, the server's ephemeral key
+	// and the nonce, and only the holder of the server identity key can sign it.
+	if err := verifyServer(out, cfg.LicenseID, base64.StdEncoding.EncodeToString(eph.PublicKey().Bytes()), nonceB64); err != nil {
+		return nil, err
+	}
+
 	srvRaw, err := base64.StdEncoding.DecodeString(out.ServerEphPub)
 	if err != nil || len(srvRaw) != 32 {
 		return nil, errors.New("bad server ephemeral key")
@@ -357,6 +374,25 @@ func fetchBundle(cfg *config, insecure bool) (*recipe.Bundle, error) {
 		return nil, fmt.Errorf("payload decrypt failed (wrong server key or tampered response): %w", err)
 	}
 	return recipe.Parse(plain)
+}
+
+// verifyServer checks the Ed25519 signature over the handshake transcript.
+//
+// reqNonce is the nonce WE generated and sent, not the AEAD nonce in the
+// response — the server signs the request nonce, and using the response nonce
+// here would silently break verification forever.
+func verifyServer(out proto.PayloadResponse, licenseID, clientEphPubB64, reqNonceB64 string) error {
+	if serverID == "" {
+		fmt.Fprintln(os.Stderr, "WARN: dev build without -X main.serverID — server not authenticated")
+		return nil
+	}
+	if out.ServerID != "" && out.ServerID != serverID {
+		return errors.New("server identity mismatch — refusing to trust this response")
+	}
+	if out.Sig == "" {
+		return errors.New("server sent no signature — refusing (is the server older than the client?)")
+	}
+	return identity.Verify(serverID, out.Sig, licenseID, clientEphPubB64, out.ServerEphPub, reqNonceB64)
 }
 
 func reportResults(cfg *config, insecure bool, bundleID string, results []recipe.Result) {
