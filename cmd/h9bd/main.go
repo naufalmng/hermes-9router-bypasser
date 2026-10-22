@@ -117,6 +117,7 @@ func cmdServe(args []string) error {
 	certFile := fs.String("tls-cert", "", "TLS certificate (empty = plain HTTP, dev only)")
 	keyFile := fs.String("tls-key", "", "TLS private key")
 	tokenKeyHex := fs.String("token-key", "", "HMAC key hex (empty = random per boot)")
+	tokenKeyFile := fs.String("token-key-file", "", "file holding the HMAC key as hex (preferred over -token-key, keeps the key out of ps)")
 	idKeyPath := fs.String("id-key", "./data/server.ed25519", "Ed25519 identity key (created if absent)")
 	minGap := fs.Duration("min-gap", 3*time.Second, "minimum delay between payload fetches per machine")
 	_ = fs.Parse(args)
@@ -137,6 +138,13 @@ func cmdServe(args []string) error {
 	s.idPub = id.PublicB64()
 	log.Printf("server identity %s (embed in client: -X main.serverID=%s)",
 		*idKeyPath, s.idPub)
+	if *tokenKeyFile != "" {
+		raw, err := os.ReadFile(*tokenKeyFile)
+		if err != nil {
+			return fmt.Errorf("token-key-file: %w", err)
+		}
+		*tokenKeyHex = strings.TrimSpace(string(raw))
+	}
 	if *tokenKeyHex != "" {
 		s.tokenKey, err = hex.DecodeString(*tokenKeyHex)
 		if err != nil || len(s.tokenKey) < 32 {

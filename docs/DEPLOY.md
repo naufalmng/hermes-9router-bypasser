@@ -1,6 +1,19 @@
 # Deployment
 
-## Server (h9bd)
+## Live instance
+
+```
+https://h9b.apizen.my.id        Cloudflare tunnel -> 127.0.0.1:18090
+```
+
+Server: `h9bd.service` at `/opt/h9b`, payloads in `/opt/h9b/payloads`, identity
+key in `/opt/h9b/data/server.ed25519`. Tunnel: separate `cloudflared-h9b.service`
+so a restart never touches the tunnel carrying SSH.
+
+Operator runbook lives outside this repo (it holds the identity public key and
+host specifics).
+
+## Server (h9bd) from scratch
 
 ### Build
 

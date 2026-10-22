@@ -6,6 +6,37 @@ by reading code.
 Concrete patch intel (anchors, chunk names, byte offsets) is deliberately kept out
 of this repository — it is the payload. See the private `FINDINGS.md`.
 
+## 2026-10-22 — deployed and proven through the public endpoint
+
+```
+https://h9b.apizen.my.id/healthz -> {"ok":true,"version":"0.1.0","bundle_version":1,"recipes":10}
+```
+
+Full cycle over the real internet, real tunnel, real client build:
+
+```
+h9bd cdk new -tier pro -days 30        -> H9B-QMWN9-...  lic_a9dc2a737bab
+h9b activate (https://h9b.apizen.my.id) -> ok, bound to this machine
+h9b apply                              -> 3 applied, 7 already, 0 failed
+python3 scan_for_threats('SOUL.md')    -> []                      (trusted)
+python3 scan_for_threats('notes.md')   -> ['prompt_injection']    (still scanned)
+```
+
+garble build verified: sensitive-string count 69 -> 1, symbol table empty,
+binary 9.1 MB vs 5.5 MB plain (obfuscation costs size; worth it).
+
+Deployment choices worth remembering:
+
+- **Second tunnel, not a new ingress rule.** `bojongkulur-edge` carries
+  `ssh.apizen.my.id`; adding a hostname there needs a restart, and a restart can
+  drop an in-flight SSH session. A dedicated `h9b` tunnel costs nothing.
+- **Port 18090, not 8080.** 8080 is already held by docker-proxy on this box. The
+  first deploy crash-looped on `bind: address already in use` before the switch.
+- **`-token-key-file`, not `-token-key`.** The latter puts the HMAC key in `ps`
+  output for every user on the box.
+- **Store reloads on mtime.** `h9bd cdk new` while the server runs used to be
+  invisible until restart, which reads to the customer as "your key is invalid".
+
 ## 2026-10-22 — framework scaffolded and proven end-to-end
 
 ### Proven by execution
