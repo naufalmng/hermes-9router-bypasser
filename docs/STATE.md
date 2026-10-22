@@ -117,6 +117,35 @@ exit 1; `rollback` → file parses again.
 Windows re-proven after the change: `basic-hermes` key → 5 recipes, `SELESAI 5/5`;
 `pro` key → 10 recipes, 5 skipped (no 9router), `SELESAI 5/5`, exit 0.
 
+Linux, using the published release binary rather than a dev build:
+
+```
+apply   3 applied, 7 already, 0 skipped, 0 failed
+verifikasi
+  ok   hg-threat-patterns ... r9-gemini-safety-2
+SELESAI — 10/10 terverifikasi      exit 0
+rollback  restored 3 file(s), 0 failed
+```
+
+The three files were restored to stock afterwards, so this box is left exactly as
+it was found.
+
+### Published
+
+`v0.1.0` on GitHub with 4 assets + `install.sh`. The customer path is proven end
+to end:
+
+```
+curl -fsSL https://github.com/naufalmng/hermes-9router-bypasser/releases/latest/download/install.sh | sh
+  fetching h9b-linux-amd64 (latest)
+  checksum ok
+  installed -> ~/.local/bin/h9b
+```
+
+`install.sh` had to be added as a release asset — the README pointed at
+`releases/latest/download/install.sh`, which 404s unless it is uploaded. The
+workflow now includes it.
+
 ## 2026-10-22 — deployed and proven through the public endpoint
 
 ```
