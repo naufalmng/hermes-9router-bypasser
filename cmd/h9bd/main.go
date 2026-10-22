@@ -562,25 +562,20 @@ func cmdCDK(args []string) error {
 			fmt.Println(string(b))
 			return nil
 		}
-		fmt.Printf("%-20s %-18s %-8s %-10s %-8s %-4s %s\n",
-			"MASK", "ID", "TIER", "EXPIRES", "APPLIES", "HW", "BOUND / STATE")
+		fmt.Printf("%-20s %-18s %-8s %-10s %-7s %s\n",
+			"MASK", "ID", "TIER", "EXPIRES", "APPLY", "STATE")
 		for _, l := range list {
-			state := "unbound"
-			if l.Revoked {
+			state := "issued"
+			switch {
+			case l.Revoked:
 				state = "REVOKED"
-			} else if l.ExpiresAt > 0 && time.Now().Unix() > l.ExpiresAt {
+			case l.ExpiresAt > 0 && time.Now().Unix() > l.ExpiresAt:
 				state = "expired"
+			case l.FP != "":
+				state = "bound"
 			}
-			bound := "-"
-			if l.FP != "" {
-				bound = fmt.Sprintf("%s %s", l.Platform, short(l.FP))
-			}
-			// HW is how many hardware components the binding can prove. A 3 is
-			// the strongest (machine + mac + disk); 2 is still above quorum; 1
-			// means the licence is held by a single component and a rebind is
-			// worth doing next time the customer is on the line.
-			fmt.Printf("%-20s %-18s %-8s %-10s %-8d %-4d %s %s\n", l.CDKMask, l.ID, l.Tier,
-				time.Unix(l.ExpiresAt, 0).Format("2006-01-02"), l.Applies, len(l.HW), bound, state)
+			fmt.Printf("%-20s %-18s %-8s %-10s %-7d %s\n", l.CDKMask, l.ID, l.Tier,
+				time.Unix(l.ExpiresAt, 0).Format("2006-01-02"), l.Applies, state)
 		}
 		return nil
 	case "revoke":
@@ -633,20 +628,30 @@ func cmdLic(args []string) error {
 			fmt.Println(string(b))
 			return nil
 		}
-		fmt.Printf("%-20s %-18s %-10s %-10s %-7s %s\n",
+		fmt.Printf("%-20s %-18s %-8s %-10s %-7s %s\n",
 			"MASK", "ID", "TIER", "EXPIRES", "APPLY", "BOUND / STATE")
 		for _, l := range list {
-			state := "unbound"
-			if l.FP != "" {
-				state = l.Platform + " " + l.FP[:8]
-			}
-			if l.Revoked {
+			// Order matters: revoked beats expired, and "unbound" only applies to
+			// a licence nobody has activated yet.
+			state := "active"
+			switch {
+			case l.Revoked:
 				state = "REVOKED"
-			} else if l.ExpiresAt > 0 && time.Now().Unix() > l.ExpiresAt {
+			case l.ExpiresAt > 0 && time.Now().Unix() > l.ExpiresAt:
 				state = "expired"
+			case l.FP == "":
+				state = "unbound"
 			}
-			fmt.Printf("%-20s %-18s %-10s %-10s %-7d %s\n", l.CDKMask, l.ID, l.Tier,
-				time.Unix(l.ExpiresAt, 0).Format("2006-01-02"), l.Applies, state)
+			bound := "-"
+			if l.FP != "" {
+				bound = fmt.Sprintf("%s %s", l.Platform, short(l.FP))
+			}
+			// HW is how many hardware components the binding can prove: 3 is the
+			// strongest (machine + mac + disk), 2 is still above quorum, and 1
+			// means the licence hangs on a single component — worth a rebind next
+			// time the customer is on the line.
+			fmt.Printf("%-20s %-18s %-8s %-10s %-7d %-4d %s %s\n", l.CDKMask, l.ID, l.Tier,
+				time.Unix(l.ExpiresAt, 0).Format("2006-01-02"), l.Applies, len(l.HW), bound, state)
 		}
 		return nil
 	case "show":
